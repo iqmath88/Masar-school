@@ -39,19 +39,22 @@ async function createSupabaseClient() {
     throw new Error('إعدادات Supabase غير موجودة في config.js');
   }
 
-  const { createClient } = await import(
-    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm'
-  );
+  if (!window.supabase) {
+    throw new Error('تعذر تحميل مكتبة Supabase');
+  }
 
-  return createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true
+  return window.supabase.createClient(
+    cfg.supabaseUrl,
+    cfg.supabaseAnonKey,
+    {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
     }
-  });
+  );
 }
-
 function loadingView(message = 'جارٍ تحميل النظام...') {
   return `
     <div class="login-wrap">
