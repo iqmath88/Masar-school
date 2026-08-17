@@ -1718,30 +1718,218 @@ function bind() {
     }
   );
 
-  $(
-    '[data-action="add-section"]'
-  )?.addEventListener(
-    'click',
-    () => {
-      showModal(
-        modal(
-          'إضافة شعبة',
+$(
+  '[data-action="add-section"]'
+)?.addEventListener(
+  'click',
+  openSectionModal
+);
+}
+function openSectionModal() {
+  const activeYear =
+    state.academicYears.find(
+      year => year.is_active
+    );
 
-          `
-            <div class="notice">
+  if (!activeYear) {
+    showModal(
+      modal(
+        'إضافة شعبة',
+        `
+          <div class="notice">
+            يجب أولًا إنشاء سنة دراسية فعالة
+            قبل إضافة الشعب.
+          </div>
+        `
+      )
+    );
 
-              ربط إنشاء الشعب
-              بقاعدة البيانات
-              سيكون في الخطوة التالية.
+    return;
+  }
 
-            </div>
-          `
-        )
-      );
-    }
+  showModal(
+    modal(
+      'إضافة شعبة',
+      `
+        <form id="sectionForm">
+
+          <div class="field">
+            <label>
+              الصف
+            </label>
+
+            <select
+              id="sectionGrade"
+              required
+            >
+              <option value="">
+                اختر الصف
+              </option>
+
+              ${state.grades
+                .map(
+                  grade => `
+                    <option value="${grade.id}">
+                      ${safeText(grade.name)}
+                    </option>
+                  `
+                )
+                .join('')}
+            </select>
+          </div>
+
+          <div class="field">
+            <label>
+              اسم الشعبة
+            </label>
+
+            <input
+              id="sectionName"
+              type="text"
+              placeholder="مثال: أ"
+              maxlength="20"
+              required
+            >
+          </div>
+
+          <button
+            id="saveSectionButton"
+            class="btn btn-primary"
+            type="submit"
+          >
+            حفظ الشعبة
+          </button>
+
+          <div
+            id="sectionFormMessage"
+            class="notice"
+            style="
+              display:none;
+              margin-top:12px;
+            "
+          ></div>
+
+        </form>
+      `
+    )
   );
+
+  $('#sectionForm')
+    ?.addEventListener(
+      'submit',
+      saveSection
+    );
 }
 
+
+async function saveSection(event) {
+  event.preventDefault();
+
+  const activeYear =
+    state.academicYears.find(
+      year => year.is_active
+    );
+
+  const gradeId =
+    $('#sectionGrade')?.value;
+
+  const name =
+    $('#sectionName')
+      ?.value
+      .trim();
+
+  const button =
+    $('#saveSectionButton');
+
+  const message =
+    $('#sectionFormMessage');
+
+  if (
+    !activeYear ||
+    !gradeId ||
+    !name
+  ) {
+    return;
+  }
+
+  try {
+    if (button) {
+      button.disabled = true;
+      button.textContent =
+        'جارٍ الحفظ...';
+    }
+
+    const {
+      error
+    } =
+      await supabaseClient
+        .from('sections')
+        .insert({
+          academic_year_id:
+            activeYear.id,
+
+          grade_id:
+            gradeId,
+
+          name:
+            name,
+
+          is_active:
+            true
+        });
+
+    if (error) {
+      throw error;
+    }
+
+    await loadSchoolData();
+
+    $('.modal-backdrop')
+      ?.remove();
+
+    render();
+
+  } catch (error) {
+    console.error(
+      'Save section error:',
+      error
+    );
+
+    if (message) {
+      message.style.display =
+        'block';
+
+      if (
+        error?.code === '23505'
+      ) {
+        message.textContent =
+          'هذه الشعبة موجودة مسبقًا لهذا الصف.';
+      }
+
+      else if (
+        error?.code === '42501'
+      ) {
+        message.textContent =
+          'ليس لديك صلاحية لإضافة شعبة.';
+      }
+
+      else {
+        message.textContent =
+          'تعذر حفظ الشعبة: ' +
+          (
+            error?.message ||
+            'خطأ غير معروف'
+          );
+      }
+    }
+
+    if (button) {
+      button.disabled = false;
+      button.textContent =
+        'حفظ الشعبة';
+    }
+  }
+}
 function filterStudents() {
   const q =
     (
