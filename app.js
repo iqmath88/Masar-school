@@ -1,4 +1,4 @@
-const $ = (s, root = document) => root.querySelector(s);
+ذonst $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
 const DAYS = {
@@ -127,6 +127,23 @@ function isAdmin() {
   return state.user?.role === 'admin';
 }
 
+
+function normalizeUsername(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase();
+}
+
+function isValidUsername(value) {
+  return /^[a-z0-9._-]{3,32}$/.test(
+    normalizeUsername(value)
+  );
+}
+
+function usernameToInternalEmail(value) {
+  return `${normalizeUsername(value)}@masar.local`;
+}
+
 /* =========================================================
    START
 ========================================================= */
@@ -182,7 +199,7 @@ async function establishUser(authUser) {
 
   const { data: profile, error: profileError } = await supabaseClient
     .from('profiles')
-    .select('id, full_name, role, phone, is_active')
+    .select('id, full_name, username, role, phone, is_active')
     .eq('id', authUser.id)
     .single();
 
@@ -200,6 +217,7 @@ async function establishUser(authUser) {
     id: authUser.id,
     email: authUser.email,
     name: profile.full_name,
+    username: profile.username || null,
     role: profile.role,
     teacherId: null
   };
@@ -420,19 +438,38 @@ function loginView() {
 
         <form id="loginForm">
           <div class="field">
-            <label>البريد الإلكتروني</label>
-            <input id="email" type="email" autocomplete="username" required>
+            <label>اسم المستخدم</label>
+            <input
+              id="loginId"
+              type="text"
+              autocomplete="username"
+              placeholder="مثال: faiz.jawad"
+              required
+            >
           </div>
 
           <div class="field">
             <label>كلمة المرور</label>
-            <input id="password" type="password" autocomplete="current-password" required>
+            <input
+              id="password"
+              type="password"
+              autocomplete="current-password"
+              required
+            >
           </div>
 
-          <button id="loginButton" class="btn btn-primary" type="submit">
+          <button
+            id="loginButton"
+            class="btn btn-primary"
+            type="submit"
+          >
             تسجيل الدخول
           </button>
         </form>
+
+        <div class="small" style="margin-top:12px">
+          الحسابات الجديدة تدخل باسم المستخدم. الحساب الإداري القديم يمكنه استخدام بريده الإلكتروني مؤقتًا.
+        </div>
 
         ${errorBlock}
       </div>
@@ -669,8 +706,20 @@ function openUserAccountModal(role = 'teacher') {
           </div>
 
           <div class="field">
-            <label>البريد الإلكتروني</label>
-            <input id="newUserEmail" type="email" autocomplete="off" required>
+            <label>اسم المستخدم</label>
+            <input
+              id="newUsername"
+              type="text"
+              minlength="3"
+              maxlength="32"
+              autocomplete="off"
+              placeholder="مثال: faiz.jawad"
+              dir="ltr"
+              required
+            >
+            <div class="small" style="margin-top:6px">
+              أحرف إنجليزية صغيرة وأرقام والنقطة والشرطة والشرطة السفلية فقط.
+            </div>
           </div>
 
           <div class="field">
@@ -699,7 +748,10 @@ function openUserAccountModal(role = 'teacher') {
 
                 <div class="field">
                   <label>التخصص</label>
-                  <input id="newTeacherSpecialization" placeholder="مثال: الرياضيات">
+                  <input
+                    id="newTeacherSpecialization"
+                    placeholder="مثال: الرياضيات"
+                  >
                 </div>
               `
               : ''
@@ -723,7 +775,10 @@ function openUserAccountModal(role = 'teacher') {
     )
   );
 
-  $('#userAccountForm')?.addEventListener('submit', saveUserAccount);
+  $('#userAccountForm')?.addEventListener(
+    'submit',
+    saveUserAccount
+  );
 }
 
 async function saveUserAccount(event) {
@@ -731,7 +786,9 @@ async function saveUserAccount(event) {
 
   const role = $('#newUserRole')?.value;
   const fullName = $('#newUserName')?.value.trim();
-  const email = $('#newUserEmail')?.value.trim();
+  const username = normalizeUsername(
+    $('#newUsername')?.value
+  );
   const password = $('#newUserPassword')?.value || '';
   const phone = $('#newUserPhone')?.value.trim() || null;
 
@@ -748,31 +805,46 @@ async function saveUserAccount(event) {
   const button = $('#saveUserAccountButton');
   const message = $('#userAccountMessage');
 
-  if (!fullName || !email || password.length < 8) return;
+  if (
+    !fullName ||
+    !isValidUsername(username) ||
+    password.length < 8
+  ) {
+    if (message) {
+      message.style.display = 'block';
+      message.textContent =
+        'تحقق من الاسم واسم المستخدم وكلمة المرور. اسم المستخدم من 3 إلى 32 محرفًا إنجليزيًا.';
+    }
+    return;
+  }
 
   try {
     button.disabled = true;
     button.textContent = 'جارٍ إنشاء الحساب...';
 
-    const { data, error } = await supabaseClient.functions.invoke(
-      'create-school-user',
-      {
-        body: {
-          email,
-          password,
-          full_name: fullName,
-          role,
-          phone,
-          employee_code: employeeCode,
-          specialization
+    const { data, error } =
+      await supabaseClient.functions.invoke(
+        'create-school-user',
+        {
+          body: {
+            username,
+            password,
+            full_name: fullName,
+            role,
+            phone,
+            employee_code: employeeCode,
+            specialization
+          }
         }
-      }
-    );
+      );
 
     if (error) throw error;
 
     if (!data?.ok) {
-      throw new Error(data?.error || 'تعذر إنشاء الحساب.');
+      throw new Error(
+        data?.error ||
+        'تعذر إنشاء الحساب.'
+      );
     }
 
     await loadSchoolData();
@@ -781,7 +853,10 @@ async function saveUserAccount(event) {
     render();
 
   } catch (error) {
-    console.error('Create account error:', error);
+    console.error(
+      'Create account error:',
+      error
+    );
 
     message.style.display = 'block';
 
@@ -1318,28 +1393,131 @@ function openAssignmentModal(teacherId = '') {
   const year = activeYear();
 
   if (!year) {
-    showModal(modal('إضافة تكليف', `<div class="notice">يجب أولًا إنشاء سنة دراسية فعالة.</div>`));
+    showModal(
+      modal(
+        'إضافة تكليف',
+        `<div class="notice">يجب أولًا إنشاء سنة دراسية فعالة.</div>`
+      )
+    );
     return;
   }
 
   const yearSections = state.sections.filter(
-    s => String(s.academic_year_id) === String(year.id) && s.is_active !== false
+    section =>
+      String(section.academic_year_id) === String(year.id) &&
+      section.is_active !== false
   );
+
+  if (!yearSections.length) {
+    showModal(
+      modal(
+        'إضافة تكليف',
+        `<div class="notice">لا توجد شعب في السنة الدراسية الحالية.</div>`
+      )
+    );
+    return;
+  }
+
+  const groups = new Map();
+
+  yearSections.forEach(section => {
+    const gradeName = section.grade || 'صف غير محدد';
+
+    if (!groups.has(gradeName)) {
+      groups.set(gradeName, []);
+    }
+
+    groups.get(gradeName).push(section);
+  });
+
+  const sectionsHtml = [...groups.entries()]
+    .map(
+      ([gradeName, sections]) => `
+        <div
+          style="
+            border:1px solid #e5eaf2;
+            border-radius:14px;
+            padding:12px;
+            margin-bottom:10px;
+          "
+        >
+          <div
+            style="
+              display:flex;
+              justify-content:space-between;
+              align-items:center;
+              gap:10px;
+              margin-bottom:10px;
+            "
+          >
+            <strong>${safeText(gradeName)}</strong>
+
+            <button
+              type="button"
+              class="btn btn-soft btn-sm"
+              data-select-grade="${safeText(gradeName)}"
+            >
+              تحديد الكل
+            </button>
+          </div>
+
+          <div
+            style="
+              display:grid;
+              grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
+              gap:8px;
+            "
+          >
+            ${sections
+              .map(
+                section => `
+                  <label
+                    style="
+                      display:flex;
+                      gap:8px;
+                      align-items:center;
+                      padding:9px 10px;
+                      border:1px solid #edf1f7;
+                      border-radius:10px;
+                      cursor:pointer;
+                    "
+                  >
+                    <input
+                      type="checkbox"
+                      data-assignment-section
+                      data-grade-name="${safeText(gradeName)}"
+                      value="${section.id}"
+                    >
+                    <span>الشعبة ${safeText(section.name)}</span>
+                  </label>
+                `
+              )
+              .join('')}
+          </div>
+        </div>
+      `
+    )
+    .join('');
 
   showModal(
     modal(
-      'إضافة تكليف للمدرس',
+      'إضافة تكليفات للمدرس',
       `
         <form id="assignmentForm">
           <div class="field">
             <label>المدرس</label>
+
             <select id="assignmentTeacher" required>
               <option value="">اختر المدرس</option>
+
               ${state.teachers
                 .map(
-                  t => `
-                    <option value="${t.id}" ${String(teacherId) === String(t.id) ? 'selected' : ''}>
-                      ${safeText(t.name)}
+                  teacher => `
+                    <option
+                      value="${teacher.id}"
+                      ${String(teacherId) === String(teacher.id) ? 'selected' : ''}
+                    >
+                      ${safeText(teacher.name)}
                     </option>
                   `
                 )
@@ -1349,42 +1527,146 @@ function openAssignmentModal(teacherId = '') {
 
           <div class="field">
             <label>المادة</label>
+
             <select id="assignmentSubject" required>
               <option value="">اختر المادة</option>
+
               ${state.subjects
-                .map(s => `<option value="${s.id}">${safeText(s.name)}</option>`)
+                .map(
+                  subject => `
+                    <option value="${subject.id}">
+                      ${safeText(subject.name)}
+                    </option>
+                  `
+                )
                 .join('')}
             </select>
           </div>
 
           <div class="field">
-            <label>الشعبة</label>
-            <select id="assignmentSection" required>
-              <option value="">اختر الشعبة</option>
-              ${yearSections
-                .map(s => `<option value="${s.id}">${safeText(s.grade)} / ${safeText(s.name)}</option>`)
-                .join('')}
-            </select>
+            <label>الصفوف والشعب</label>
+
+            <div
+              class="notice"
+              style="margin-bottom:10px"
+            >
+              يمكنك تحديد أكثر من شعبة ومن أكثر من مرحلة في عملية واحدة.
+            </div>
+
+            <div id="assignmentSections">
+              ${sectionsHtml}
+            </div>
+
+            <div
+              id="assignmentSelectionCount"
+              class="small"
+              style="margin-top:8px;font-weight:700"
+            >
+              لم يتم اختيار أي شعبة.
+            </div>
           </div>
 
           <div class="field">
             <label>تاريخ بداية التكليف</label>
-            <input id="assignmentStart" type="date" value="${year.start_date || ''}" required>
+            <input
+              id="assignmentStart"
+              type="date"
+              value="${year.start_date || ''}"
+              required
+            >
           </div>
 
           <div class="field">
             <label>تاريخ نهاية التكليف</label>
-            <input id="assignmentEnd" type="date" value="${year.end_date || ''}">
+            <input
+              id="assignmentEnd"
+              type="date"
+              value="${year.end_date || ''}"
+            >
           </div>
 
-          <button id="saveAssignmentButton" class="btn btn-primary" type="submit">حفظ التكليف</button>
-          <div id="assignmentFormMessage" class="notice" style="display:none; margin-top:12px"></div>
+          <button
+            id="saveAssignmentButton"
+            class="btn btn-primary"
+            type="submit"
+          >
+            حفظ التكليفات
+          </button>
+
+          <div
+            id="assignmentFormMessage"
+            class="notice"
+            style="display:none;margin-top:12px"
+          ></div>
         </form>
       `
     )
   );
 
-  $('#assignmentForm')?.addEventListener('submit', saveAssignment);
+  $$('[data-assignment-section]').forEach(
+    checkbox =>
+      checkbox.addEventListener(
+        'change',
+        updateAssignmentSelectionCount
+      )
+  );
+
+  $$('[data-select-grade]').forEach(
+    button =>
+      button.addEventListener(
+        'click',
+        () => {
+          const gradeName =
+            button.dataset.selectGrade;
+
+          const boxes =
+            $$('[data-assignment-section]')
+              .filter(
+                box =>
+                  box.dataset.gradeName === gradeName
+              );
+
+          const shouldCheck =
+            boxes.some(box => !box.checked);
+
+          boxes.forEach(
+            box => {
+              box.checked = shouldCheck;
+            }
+          );
+
+          button.textContent =
+            shouldCheck
+              ? 'إلغاء تحديد الكل'
+              : 'تحديد الكل';
+
+          updateAssignmentSelectionCount();
+        }
+      )
+  );
+
+  $('#assignmentForm')?.addEventListener(
+    'submit',
+    saveAssignment
+  );
+
+  updateAssignmentSelectionCount();
+}
+
+function updateAssignmentSelectionCount() {
+  const count =
+    $$('[data-assignment-section]:checked')
+      .length;
+
+  const target =
+    $('#assignmentSelectionCount');
+
+  if (!target) return;
+
+  target.textContent =
+    count
+      ? `تم اختيار ${count} شعبة.`
+      : 'لم يتم اختيار أي شعبة.';
 }
 
 async function saveAssignment(event) {
@@ -1394,39 +1676,117 @@ async function saveAssignment(event) {
   const message = $('#assignmentFormMessage');
   const button = $('#saveAssignmentButton');
 
-  const payload = {
-    teacher_id: $('#assignmentTeacher')?.value,
-    subject_id: $('#assignmentSubject')?.value,
-    section_id: $('#assignmentSection')?.value,
-    academic_year_id: year?.id,
-    start_date: $('#assignmentStart')?.value,
-    end_date: $('#assignmentEnd')?.value || null,
-    status: 'active'
-  };
+  const teacherId =
+    $('#assignmentTeacher')?.value;
 
-  if (!payload.teacher_id || !payload.subject_id || !payload.section_id || !payload.academic_year_id || !payload.start_date) {
+  const subjectId =
+    $('#assignmentSubject')?.value;
+
+  const sectionIds =
+    $$('[data-assignment-section]:checked')
+      .map(box => box.value);
+
+  const startDate =
+    $('#assignmentStart')?.value;
+
+  const endDate =
+    $('#assignmentEnd')?.value || null;
+
+  if (
+    !teacherId ||
+    !subjectId ||
+    !year?.id ||
+    !startDate ||
+    !sectionIds.length
+  ) {
+    message.style.display = 'block';
+    message.textContent =
+      'اختر المدرس والمادة وشعبة واحدة على الأقل.';
     return;
   }
 
+  const existingKeys = new Set(
+    state.assignments
+      .filter(
+        assignment =>
+          String(assignment.teacher_id) === String(teacherId) &&
+          String(assignment.subject_id) === String(subjectId) &&
+          String(assignment.academic_year_id) === String(year.id) &&
+          assignment.status === 'active'
+      )
+      .map(
+        assignment =>
+          String(assignment.section_id)
+      )
+  );
+
+  const newSectionIds =
+    sectionIds.filter(
+      sectionId =>
+        !existingKeys.has(
+          String(sectionId)
+        )
+    );
+
+  if (!newSectionIds.length) {
+    message.style.display = 'block';
+    message.textContent =
+      'كل الشعب المحددة مكلف بها هذا المدرس لهذه المادة بالفعل.';
+    return;
+  }
+
+  const rows = newSectionIds.map(
+    sectionId => ({
+      teacher_id: teacherId,
+      subject_id: subjectId,
+      section_id: sectionId,
+      academic_year_id: year.id,
+      start_date: startDate,
+      end_date: endDate,
+      status: 'active'
+    })
+  );
+
   try {
     button.disabled = true;
-    button.textContent = 'جارٍ الحفظ...';
+    button.textContent =
+      `جارٍ حفظ ${rows.length} تكليف...`;
 
-    const { error } = await supabaseClient
-      .from('teacher_assignments')
-      .insert(payload);
+    const { error } =
+      await supabaseClient
+        .from('teacher_assignments')
+        .insert(rows);
 
     if (error) throw error;
 
+    const skipped =
+      sectionIds.length -
+      newSectionIds.length;
+
     await loadSchoolData();
+
     $('.modal-backdrop')?.remove();
     render();
+
+    if (skipped > 0) {
+      alert(
+        `تم حفظ ${rows.length} تكليف بنجاح، وتم تجاهل ${skipped} تكليف موجود مسبقًا.`
+      );
+    }
+
   } catch (error) {
+    console.error(
+      'Save assignments error:',
+      error
+    );
+
     message.style.display = 'block';
-    message.textContent = 'تعذر حفظ التكليف: ' + (error?.message || 'خطأ غير معروف');
+    message.textContent =
+      'تعذر حفظ التكليفات: ' +
+      (error?.message || 'خطأ غير معروف');
 
     button.disabled = false;
-    button.textContent = 'حفظ التكليف';
+    button.textContent = 'حفظ التكليفات';
   }
 }
 
@@ -2517,49 +2877,94 @@ function bindModal() {
 async function handleLogin(e) {
   e.preventDefault();
 
-  const email = $('#email')?.value.trim();
-  const password = $('#password')?.value || '';
-  const button = $('#loginButton');
+  const loginId =
+    $('#loginId')?.value.trim() || '';
 
-  if (!email || !password) return;
+  const password =
+    $('#password')?.value || '';
+
+  const button =
+    $('#loginButton');
+
+  if (!loginId || !password) return;
 
   state.error = '';
 
   if (button) {
     button.disabled = true;
-    button.textContent = 'جارٍ تسجيل الدخول...';
+    button.textContent =
+      'جارٍ تسجيل الدخول...';
   }
 
   try {
-    const { data, error } = await supabaseClient.auth.signInWithPassword({
-      email,
-      password
-    });
+    let email;
+
+    /*
+      دعم مؤقت للحساب الإداري القديم:
+      إذا كتب المستخدم بريدًا كاملًا نستعمله كما هو.
+      أما الحسابات الجديدة فتدخل باسم المستخدم فقط.
+    */
+    if (loginId.includes('@')) {
+      email = loginId;
+    } else {
+      const username =
+        normalizeUsername(loginId);
+
+      if (!isValidUsername(username)) {
+        throw new Error(
+          'اسم المستخدم غير صالح.'
+        );
+      }
+
+      email =
+        usernameToInternalEmail(
+          username
+        );
+    }
+
+    const { data, error } =
+      await supabaseClient.auth
+        .signInWithPassword({
+          email,
+          password
+        });
 
     if (error) throw error;
 
     if (!data.user) {
-      throw new Error('تعذر الحصول على بيانات المستخدم.');
+      throw new Error(
+        'تعذر الحصول على بيانات المستخدم.'
+      );
     }
 
-    await establishUser(data.user);
+    await establishUser(
+      data.user
+    );
+
   } catch (err) {
     console.error(err);
 
-    let message = err?.message || 'تعذر تسجيل الدخول';
+    let message =
+      err?.message ||
+      'تعذر تسجيل الدخول';
 
     if (
       /invalid login credentials/i.test(message) ||
       /email not confirmed/i.test(message)
     ) {
-      message = 'البريد الإلكتروني أو كلمة المرور غير صحيحة.';
-    } else if (/failed to fetch/i.test(message)) {
-      message = 'تعذر الاتصال بخادم Supabase. تحقق من رابط المشروع في config.js واتصال الإنترنت.';
+      message =
+        'اسم المستخدم أو كلمة المرور غير صحيحة.';
+    } else if (
+      /failed to fetch/i.test(message)
+    ) {
+      message =
+        'تعذر الاتصال بخادم Supabase. تحقق من اتصال الإنترنت.';
     }
 
     state.error = message;
     state.user = null;
     state.loading = false;
+
     render();
   }
 }
