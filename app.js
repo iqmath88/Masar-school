@@ -1550,7 +1550,12 @@ function openAssignmentModal(teacherId = '') {
               class="notice"
               style="margin-bottom:10px"
             >
-              يمكنك تحديد أكثر من شعبة ومن أكثر من مرحلة في عملية واحدة.
+              يمكنك تكليف المدرس بأكثر من مرحلة وأكثر من شعبة في عملية واحدة.
+            </div>
+
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+              <button type="button" class="btn btn-soft btn-sm" id="selectAllAssignmentSections">تحديد جميع الشعب</button>
+              <button type="button" class="btn btn-soft btn-sm" id="clearAllAssignmentSections">إلغاء تحديد الجميع</button>
             </div>
 
             <div id="assignmentSections">
@@ -1645,6 +1650,18 @@ function openAssignmentModal(teacherId = '') {
       )
   );
 
+  $('#selectAllAssignmentSections')?.addEventListener('click', () => {
+    $$('[data-assignment-section]').forEach(box => { box.checked = true; });
+    $$('[data-select-grade]').forEach(button => { button.textContent = 'إلغاء تحديد الكل'; });
+    updateAssignmentSelectionCount();
+  });
+
+  $('#clearAllAssignmentSections')?.addEventListener('click', () => {
+    $$('[data-assignment-section]').forEach(box => { box.checked = false; });
+    $$('[data-select-grade]').forEach(button => { button.textContent = 'تحديد الكل'; });
+    updateAssignmentSelectionCount();
+  });
+
   $('#assignmentForm')?.addEventListener(
     'submit',
     saveAssignment
@@ -1663,10 +1680,22 @@ function updateAssignmentSelectionCount() {
 
   if (!target) return;
 
-  target.textContent =
-    count
-      ? `تم اختيار ${count} شعبة.`
-      : 'لم يتم اختيار أي شعبة.';
+  if (!count) {
+    target.textContent = 'لم يتم اختيار أي شعبة.';
+    return;
+  }
+
+  const byGrade = new Map();
+  $$('[data-assignment-section]:checked').forEach(box => {
+    const grade = box.dataset.gradeName || 'مرحلة غير محددة';
+    byGrade.set(grade, (byGrade.get(grade) || 0) + 1);
+  });
+
+  const summary = [...byGrade.entries()]
+    .map(([grade, total]) => `${grade}: ${total}`)
+    .join(' • ');
+
+  target.textContent = `تم اختيار ${count} شعبة — ${summary}`;
 }
 
 async function saveAssignment(event) {
@@ -3107,3 +3136,4 @@ function filterStudents() {
 }
 
 mount();
+
