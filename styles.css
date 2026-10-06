@@ -41,3 +41,6 @@ body:has(.modal-backdrop){overflow:hidden;}
   }
   .modal-head{top:-16px;padding-top:16px;}
 }
+
+/* Masar v1.3.0 — Smart Timetable */
+.availability-grid{display:grid;grid-template-columns:90px repeat(7,minmax(64px,1fr));gap:6px;min-width:620px;align-items:stretch;margin:12px 0 18px}.availability-grid strong{display:grid;place-items:center;font-size:12px}.availability-cell{border:1px solid var(--border);border-radius:9px;padding:9px 4px;font-size:11px;cursor:pointer}.pref-available{background:#f8fafc;color:#475569}.pref-preferred{background:#e9f8ef;color:#168a4b}.pref-avoid{background:#fff6df;color:#9a6700}.pref-blocked{background:#ffedf0;color:#b42335}.smart-rule-list{display:grid;gap:8px;max-height:45vh;overflow:auto;margin-bottom:14px}.smart-rule-row{display:grid;grid-template-columns:1fr 80px;gap:10px;align-items:center;border-bottom:1px solid #edf1f7;padding:8px 0}.smart-rule-row input{width:100%;border:1px solid var(--border);border-radius:9px;padding:8px}@media(max-width:650px){.availability-grid{overflow:auto}.smart-rule-row{grid-template-columns:1fr 64px}}

@@ -1,8 +1,8 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
-const MASAR_VERSION = '1.2.0';
-const MASAR_DB_TARGET = 2;
+const MASAR_VERSION = '1.3.0';
+const MASAR_DB_TARGET = 3;
 
 const DAYS = {
   1: 'الأحد',
@@ -27,6 +27,8 @@ const state = {
   students: [],
   assignments: [],
   timetable: [],
+  teacherAvailability: [],
+  timetableRules: [],
   exams: [],
   systemHealth: { dbVersion: null, status: 'unknown', message: '' }
 };
@@ -298,7 +300,7 @@ async function loadSchoolData() {
 
     supabaseClient
       .from('timetable')
-      .select('id, assignment_id, day_of_week, period_number, room, is_active')
+      .select('id, assignment_id, day_of_week, period_number, room, is_active, is_locked')
       .eq('is_active', true),
 
     supabaseClient
@@ -406,7 +408,8 @@ async function loadSchoolData() {
         day: DAYS[tt.day_of_week] || String(tt.day_of_week),
         dayOfWeek: tt.day_of_week,
         period: tt.period_number,
-        room: tt.room || ''
+        room: tt.room || '',
+        isLocked: tt.is_locked === true
       };
     })
     .filter(Boolean)
@@ -1869,156 +1872,129 @@ function timetableView() {
 
   return `
     <div class="page-title">
-      <h1>جدول الحصص</h1>
-      <button class="btn btn-primary" data-action="add-timetable">+ إضافة حصة</button>
+      <h1>جدول الحصص الذكي</h1>
+      <div class="toolbar">
+        <button class="btn btn-primary" data-action="generate-timetable">⚡ إنشاء تلقائي</button>
+        <button class="btn btn-soft" data-action="teacher-availability">⚙ تخصيص المدرسين</button>
+        <button class="btn btn-soft" data-action="add-timetable">+ إضافة حصة يدوياً</button>
+      </div>
     </div>
 
     <div class="notice">
-      جدول الحصص هو المرجع الفعلي لصلاحية المدرس.
+      ينشئ مسار الجدول آلياً مع منع تعارض المدرس والشعبة، واحترام الأوقات الممنوعة، ثم يحاول تحقيق الأوقات المفضلة. يمكن قفل أي حصة قبل إعادة التوليد.
     </div>
 
     <div class="card">
       ${table(
         state.timetable,
-        ['اليوم', 'الحصة', 'المدرس', 'المادة', 'الصف', 'الشعبة', 'القاعة', 'إجراءات'],
+        ['اليوم', 'الحصة', 'المدرس', 'المادة', 'الصف', 'الشعبة', 'القاعة', 'الحالة', 'إجراءات'],
         r => [
-          safeText(r.day),
-          r.period,
-          safeText(r.teacher),
-          safeText(r.subject),
-          safeText(r.grade),
-          safeText(r.section),
-          safeText(r.room),
-          `<button class="btn btn-soft btn-sm" data-delete-timetable="${r.id}">حذف</button>`
+          safeText(r.day), r.period, safeText(r.teacher), safeText(r.subject), safeText(r.grade), safeText(r.section), safeText(r.room),
+          r.isLocked ? '<span class="badge badge-warning">🔒 مقفلة</span>' : '<span class="badge badge-success">مرنة</span>',
+          `<button class="btn btn-soft btn-sm" data-toggle-lock="${r.id}" data-locked="${r.isLocked ? '1':'0'}">${r.isLocked ? 'فتح القفل' : 'قفل'}</button> <button class="btn btn-soft btn-sm" data-delete-timetable="${r.id}">حذف</button>`
         ]
       )}
     </div>
   `;
 }
 
+async function loadTimetablePreferences() {
+  const [a, r] = await Promise.all([
+    supabaseClient.from('teacher_availability').select('teacher_id, day_of_week, period_number, preference'),
+    supabaseClient.from('assignment_timetable_rules').select('assignment_id, weekly_periods')
+  ]);
+  if (a.error) throw a.error;
+  if (r.error) throw r.error;
+  state.teacherAvailability = a.data || [];
+  state.timetableRules = r.data || [];
+}
+
+async function openTeacherAvailabilityModal() {
+  try { await loadTimetablePreferences(); } catch (e) { alert('يجب تنفيذ تحديث قاعدة البيانات v1.3.0 أولاً.'); return; }
+  if (!state.teachers.length) return alert('لا يوجد مدرسون.');
+  const teacherOptions = state.teachers.map(t=>`<option value="${t.id}">${safeText(t.name)}</option>`).join('');
+  showModal(modal('تخصيص أوقات المدرسين', `
+    <div class="field"><label>المدرس</label><select id="availabilityTeacher">${teacherOptions}</select></div>
+    <div class="notice small">اضغط على الخلية لتغيير حالتها: متاح ← مفضّل ← غير مفضّل ← ممنوع. المنع قيد إلزامي، أما التفضيلات فيحاول المولد تحقيقها.</div>
+    <div id="availabilityGrid"></div>
+    <button class="btn btn-primary" id="saveAvailability">حفظ التخصيص</button>
+  `));
+  const draw=()=>{
+    const tid=$('#availabilityTeacher').value;
+    const map=new Map(state.teacherAvailability.filter(x=>String(x.teacher_id)===String(tid)).map(x=>[`${x.day_of_week}-${x.period_number}`,x.preference]));
+    let html='<div class="availability-grid"><div></div>'+Array.from({length:7},(_,i)=>`<strong>ح${i+1}</strong>`).join('');
+    for(let d=1;d<=5;d++){
+      html+=`<strong>${DAYS[d]}</strong>`;
+      for(let p=1;p<=7;p++){ const pref=map.get(`${d}-${p}`)||'available'; html+=`<button type="button" class="availability-cell pref-${pref}" data-day="${d}" data-period="${p}" data-pref="${pref}">${prefLabel(pref)}</button>`; }
+    }
+    html+='</div>'; $('#availabilityGrid').innerHTML=html;
+    $$('.availability-cell').forEach(b=>b.addEventListener('click',()=>{ const order=['available','preferred','avoid','blocked']; const n=order[(order.indexOf(b.dataset.pref)+1)%order.length]; b.dataset.pref=n; b.className=`availability-cell pref-${n}`; b.textContent=prefLabel(n); }));
+  };
+  $('#availabilityTeacher').addEventListener('change',draw); draw();
+  $('#saveAvailability').addEventListener('click',async()=>{
+    const tid=$('#availabilityTeacher').value;
+    const rows=$$('.availability-cell').filter(b=>b.dataset.pref!=='available').map(b=>({teacher_id:tid,day_of_week:+b.dataset.day,period_number:+b.dataset.period,preference:b.dataset.pref}));
+    const del=await supabaseClient.from('teacher_availability').delete().eq('teacher_id',tid); if(del.error) return alert(del.error.message);
+    if(rows.length){ const ins=await supabaseClient.from('teacher_availability').insert(rows); if(ins.error) return alert(ins.error.message); }
+    await loadTimetablePreferences(); alert('تم حفظ تخصيص المدرس.'); draw();
+  });
+}
+function prefLabel(p){ return ({available:'متاح',preferred:'مفضّل',avoid:'غير مفضّل',blocked:'ممنوع'})[p]||p; }
+
+async function openGenerateTimetableModal(){
+  try { await loadTimetablePreferences(); } catch(e){ alert('يجب تنفيذ UPDATE_DATABASE_v1.3.0.sql أولاً.'); return; }
+  const active=state.assignments.filter(a=>a.status==='active' && (!activeYear() || String(a.academic_year_id)===String(activeYear().id)));
+  if(!active.length) return alert('لا توجد تكليفات فعالة.');
+  const ruleMap=new Map(state.timetableRules.map(r=>[String(r.assignment_id),r.weekly_periods]));
+  showModal(modal('إنشاء الجدول تلقائياً',`
+    <div class="notice">حدد عدد الحصص الأسبوعية لكل تكليف. الحصص المقفلة 🔒 ستبقى في مكانها عند إعادة التوليد.</div>
+    <div class="smart-rule-list">${active.map(a=>{const t=teacherById(a.teacher_id),s=subjectById(a.subject_id),sec=sectionById(a.section_id);return `<div class="smart-rule-row"><span>${safeText(t?.name||'')} — ${safeText(s?.name||'')} — ${safeText(sec?.grade||'')}/${safeText(sec?.name||'')}</span><input type="number" min="1" max="10" value="${ruleMap.get(String(a.id))||1}" data-weekly="${a.id}"></div>`}).join('')}</div>
+    <div class="form-grid"><div class="field"><label>أيام الدوام</label><input id="genDays" type="number" min="1" max="6" value="5"></div><div class="field"><label>عدد الحصص يومياً</label><input id="genPeriods" type="number" min="1" max="12" value="7"></div></div>
+    <button id="runGenerator" class="btn btn-primary">⚡ إنشاء الجدول</button><div id="generatorMessage" class="notice" style="display:none;margin-top:12px"></div>
+  `));
+  $('#runGenerator').addEventListener('click',runSmartGenerator);
+}
+
+async function runSmartGenerator(){
+  const btn=$('#runGenerator'), msg=$('#generatorMessage'); btn.disabled=true; btn.textContent='جارٍ إنشاء الجدول...';
+  try{
+    const weekly=new Map($$('[data-weekly]').map(i=>[String(i.dataset.weekly),Math.max(1,+i.value||1)]));
+    const rules=[...weekly].map(([assignment_id,weekly_periods])=>({assignment_id,weekly_periods}));
+    const up=await supabaseClient.from('assignment_timetable_rules').upsert(rules,{onConflict:'assignment_id'}); if(up.error) throw up.error;
+    const days=Math.max(1,Math.min(6,+$('#genDays').value||5)), periods=Math.max(1,Math.min(12,+$('#genPeriods').value||7));
+    const locked=state.timetable.filter(x=>x.isLocked);
+    const teacherBusy=new Set(locked.map(x=>`${x.teacherId}-${x.dayOfWeek}-${x.period}`));
+    const sectionBusy=new Set(locked.map(x=>{const a=state.assignments.find(y=>String(y.id)===String(x.assignmentId));return `${a?.section_id}-${x.dayOfWeek}-${x.period}`}));
+    const prefMap=new Map(state.teacherAvailability.map(x=>[`${x.teacher_id}-${x.day_of_week}-${x.period_number}`,x.preference]));
+    const tasks=[];
+    for(const a of state.assignments.filter(a=>a.status==='active')){
+      const already=locked.filter(x=>String(x.assignmentId)===String(a.id)).length;
+      const need=Math.max(0,(weekly.get(String(a.id))||1)-already);
+      for(let i=0;i<need;i++) tasks.push(a);
+    }
+    const slotsFor=a=>{const arr=[];for(let d=1;d<=days;d++)for(let p=1;p<=periods;p++){const pref=prefMap.get(`${a.teacher_id}-${d}-${p}`)||'available';if(pref==='blocked')continue;arr.push({d,p,pref,score:pref==='preferred'?0:pref==='available'?10:30});}return arr.sort((x,y)=>x.score-y.score)};
+    tasks.sort((a,b)=>slotsFor(a).length-slotsFor(b).length);
+    const result=[];
+    function place(i){if(i===tasks.length)return true;const a=tasks[i];for(const sl of slotsFor(a)){const tk=`${a.teacher_id}-${sl.d}-${sl.p}`,sk=`${a.section_id}-${sl.d}-${sl.p}`;if(teacherBusy.has(tk)||sectionBusy.has(sk))continue;teacherBusy.add(tk);sectionBusy.add(sk);result.push({assignment_id:a.id,day_of_week:sl.d,period_number:sl.p,room:null,is_active:true,is_locked:false});if(place(i+1))return true;result.pop();teacherBusy.delete(tk);sectionBusy.delete(sk);}return false;}
+    if(!place(0)) throw new Error('تعذر إيجاد جدول يحقق القيود الحالية. خفف الأوقات الممنوعة أو زد أيام/حصص الدوام.');
+    const unlockedIds=state.timetable.filter(x=>!x.isLocked).map(x=>x.id); if(unlockedIds.length){const del=await supabaseClient.from('timetable').delete().in('id',unlockedIds);if(del.error)throw del.error;}
+    if(result.length){const ins=await supabaseClient.from('timetable').insert(result);if(ins.error)throw ins.error;}
+    await loadSchoolData(); $('.modal-backdrop')?.remove(); render(); alert(`تم إنشاء الجدول بنجاح: ${result.length} حصة جديدة، مع الاحتفاظ بـ ${locked.length} حصة مقفلة.`);
+  }catch(e){msg.style.display='block';msg.textContent=e.message||'تعذر إنشاء الجدول';btn.disabled=false;btn.textContent='⚡ إنشاء الجدول';}
+}
+
+async function toggleTimetableLock(id,locked){
+  const {error}=await supabaseClient.from('timetable').update({is_locked:!locked}).eq('id',id); if(error)return alert(error.message); await loadSchoolData();render();
+}
+
 function openTimetableModal() {
-  if (!activeYear()) {
-    showModal(modal('إضافة حصة', `<div class="notice">يجب أولًا إنشاء سنة دراسية فعالة.</div>`));
-    return;
-  }
-
-  if (!state.assignments.length) {
-    showModal(modal('إضافة حصة', `<div class="notice">يجب أولًا إنشاء تكليف للمدرس بمادة وشعبة.</div>`));
-    return;
-  }
-
-  showModal(
-    modal(
-      'إضافة حصة',
-      `
-        <form id="timetableForm">
-          <div class="field">
-            <label>التكليف</label>
-            <select id="timetableAssignment" required>
-              <option value="">اختر التكليف</option>
-              ${state.assignments
-                .map(a => {
-                  const t = teacherById(a.teacher_id);
-                  const s = subjectById(a.subject_id);
-                  const sec = sectionById(a.section_id);
-
-                  return `
-                    <option value="${a.id}">
-                      ${safeText(t?.name || 'مدرس')} — ${safeText(s?.name || '')} — ${safeText(sec?.grade || '')}/${safeText(sec?.name || '')}
-                    </option>
-                  `;
-                })
-                .join('')}
-            </select>
-          </div>
-
-          <div class="field">
-            <label>اليوم</label>
-            <select id="timetableDay" required>
-              ${Object.entries(DAYS)
-                .map(([id, name]) => `<option value="${id}">${name}</option>`)
-                .join('')}
-            </select>
-          </div>
-
-          <div class="field">
-            <label>رقم الحصة</label>
-            <input id="timetablePeriod" type="number" min="1" max="12" required>
-          </div>
-
-          <div class="field">
-            <label>القاعة</label>
-            <input id="timetableRoom">
-          </div>
-
-          <button id="saveTimetableButton" class="btn btn-primary" type="submit">إضافة الحصة</button>
-          <div id="timetableFormMessage" class="notice" style="display:none; margin-top:12px"></div>
-        </form>
-      `
-    )
-  );
-
+  if (!activeYear()) { showModal(modal('إضافة حصة', `<div class="notice">يجب أولًا إنشاء سنة دراسية فعالة.</div>`)); return; }
+  if (!state.assignments.length) { showModal(modal('إضافة حصة', `<div class="notice">يجب أولًا إنشاء تكليف للمدرس بمادة وشعبة.</div>`)); return; }
+  showModal(modal('إضافة حصة',`<form id="timetableForm"><div class="field"><label>التكليف</label><select id="timetableAssignment" required><option value="">اختر التكليف</option>${state.assignments.map(a=>{const t=teacherById(a.teacher_id),s=subjectById(a.subject_id),sec=sectionById(a.section_id);return `<option value="${a.id}">${safeText(t?.name||'مدرس')} — ${safeText(s?.name||'')} — ${safeText(sec?.grade||'')}/${safeText(sec?.name||'')}</option>`}).join('')}</select></div><div class="field"><label>اليوم</label><select id="timetableDay" required>${Object.entries(DAYS).map(([id,name])=>`<option value="${id}">${name}</option>`).join('')}</select></div><div class="field"><label>رقم الحصة</label><input id="timetablePeriod" type="number" min="1" max="12" required></div><div class="field"><label>القاعة</label><input id="timetableRoom"></div><button id="saveTimetableButton" class="btn btn-primary" type="submit">إضافة الحصة</button><div id="timetableFormMessage" class="notice" style="display:none;margin-top:12px"></div></form>`));
   $('#timetableForm')?.addEventListener('submit', saveTimetable);
 }
-
-async function saveTimetable(event) {
-  event.preventDefault();
-
-  const message = $('#timetableFormMessage');
-  const button = $('#saveTimetableButton');
-
-  const payload = {
-    assignment_id: $('#timetableAssignment')?.value,
-    day_of_week: Number($('#timetableDay')?.value),
-    period_number: Number($('#timetablePeriod')?.value),
-    room: $('#timetableRoom')?.value.trim() || null,
-    is_active: true
-  };
-
-  if (!payload.assignment_id || !payload.day_of_week || !payload.period_number) return;
-
-  try {
-    button.disabled = true;
-    button.textContent = 'جارٍ الحفظ...';
-
-    const { error } = await supabaseClient
-      .from('timetable')
-      .insert(payload);
-
-    if (error) throw error;
-
-    await loadSchoolData();
-    $('.modal-backdrop')?.remove();
-    render();
-  } catch (error) {
-    message.style.display = 'block';
-    message.textContent =
-      error?.code === '23505'
-        ? 'هذه الحصة موجودة مسبقًا لنفس التكليف.'
-        : 'تعذر حفظ الحصة: ' + (error?.message || 'خطأ غير معروف');
-
-    button.disabled = false;
-    button.textContent = 'إضافة الحصة';
-  }
-}
-
-async function deleteTimetable(id) {
-  if (!confirm('هل تريد حذف هذه الحصة؟')) return;
-
-  try {
-    const { error } = await supabaseClient
-      .from('timetable')
-      .delete()
-      .eq('id', id);
-
-    if (error) throw error;
-
-    await loadSchoolData();
-    render();
-  } catch (error) {
-    alert('تعذر حذف الحصة: ' + (error?.message || 'خطأ غير معروف'));
-  }
-}
+async function saveTimetable(event){event.preventDefault();const message=$('#timetableFormMessage'),button=$('#saveTimetableButton');const payload={assignment_id:$('#timetableAssignment')?.value,day_of_week:Number($('#timetableDay')?.value),period_number:Number($('#timetablePeriod')?.value),room:$('#timetableRoom')?.value.trim()||null,is_active:true,is_locked:false};if(!payload.assignment_id||!payload.day_of_week||!payload.period_number)return;try{button.disabled=true;button.textContent='جارٍ الحفظ...';const {error}=await supabaseClient.from('timetable').insert(payload);if(error)throw error;await loadSchoolData();$('.modal-backdrop')?.remove();render();}catch(error){message.style.display='block';message.textContent='تعذر حفظ الحصة: '+(error?.message||'خطأ غير معروف');button.disabled=false;button.textContent='إضافة الحصة';}}
+async function deleteTimetable(id){if(!confirm('هل تريد حذف هذه الحصة؟'))return;try{const {error}=await supabaseClient.from('timetable').delete().eq('id',id);if(error)throw error;await loadSchoolData();render();}catch(error){alert('تعذر حذف الحصة: '+(error?.message||'خطأ غير معروف'));}}
 
 /* =========================================================
    TEACHER PAGES
@@ -3093,6 +3069,8 @@ function bind() {
   $('[data-action="add-section"]')?.addEventListener('click', () => openSectionModal());
   $('[data-action="add-subject"]')?.addEventListener('click', () => openSubjectModal());
   $('[data-action="add-timetable"]')?.addEventListener('click', openTimetableModal);
+  $('[data-action="generate-timetable"]')?.addEventListener('click', openGenerateTimetableModal);
+  $('[data-action="teacher-availability"]')?.addEventListener('click', openTeacherAvailabilityModal);
   $('[data-action="add-year"]')?.addEventListener('click', openYearModal);
 
   $('[data-action="record-attendance"]')?.addEventListener(
@@ -3152,6 +3130,7 @@ function bind() {
   $$('[data-delete-timetable]').forEach(button =>
     button.addEventListener('click', () => deleteTimetable(button.dataset.deleteTimetable))
   );
+  $$('[data-toggle-lock]').forEach(button => button.addEventListener('click', () => toggleTimetableLock(button.dataset.toggleLock, button.dataset.locked === '1')));
 
   $$('[data-activate-year]').forEach(button =>
     button.addEventListener('click', () => activateYear(button.dataset.activateYear))
