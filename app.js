@@ -1,7 +1,7 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
-const MASAR_VERSION = '1.3.2';
+const MASAR_VERSION = '1.4.0';
 const MASAR_DB_TARGET = 3;
 
 const DAYS = {
@@ -1303,12 +1303,17 @@ function teachersView() {
         <h3>المدرسون</h3>
         ${table(
           state.teachers,
-          ['المدرس', 'التخصص', 'إجراءات'],
-          r => [
-            safeText(r.name),
-            safeText(r.subject),
-            `<button class="btn btn-soft btn-sm" data-add-assignment="${r.id}">إضافة تكليف</button>`
-          ]
+          ['المدرس', 'التخصص', 'المواد التي يدرسها', 'إجراءات'],
+          r => {
+            const teacherAssignments = state.assignments.filter(a => String(a.teacher_id) === String(r.id) && a.status === 'active');
+            const subjectNames = [...new Set(teacherAssignments.map(a => subjectById(a.subject_id)?.name).filter(Boolean))];
+            return [
+              safeText(r.name),
+              safeText(r.specialization || ''),
+              subjectNames.length ? subjectNames.map(name => `<span class="badge badge-info">${safeText(name)}</span>`).join(' ') : '<span class="muted">لا توجد تكليفات</span>',
+              `<button class="btn btn-soft btn-sm" data-add-assignment="${r.id}">إضافة تكليف</button>`
+            ];
+          }
         )}
 
         <div class="notice" style="margin-top:16px">
@@ -1967,31 +1972,57 @@ function timetableSetupError(error) {
 async function openTeacherAvailabilityModal() {
   try { await loadTimetablePreferences(); } catch (e) { alert(timetableSetupError(e)); return; }
   if (!state.teachers.length) return alert('لا يوجد مدرسون.');
-  const teacherOptions = state.teachers.map(t=>`<option value="${t.id}">${safeText(t.name)}</option>`).join('');
-  showModal(modal('تخصيص أوقات المدرسين', `
-    <div class="field"><label>المدرس</label><select id="availabilityTeacher">${teacherOptions}</select></div>
-    <div class="notice small">اضغط على الخلية لتغيير حالتها: متاح ← مفضّل ← غير مفضّل ← ممنوع. المنع قيد إلزامي، أما التفضيلات فيحاول المولد تحقيقها.</div>
-    <div id="availabilityGrid"></div>
-    <button class="btn btn-primary" id="saveAvailability">حفظ التخصيص</button>
-  `));
-  const draw=()=>{
-    const tid=$('#availabilityTeacher').value;
-    const map=new Map(state.teacherAvailability.filter(x=>String(x.teacher_id)===String(tid)).map(x=>[`${x.day_of_week}-${x.period_number}`,x.preference]));
-    let html='<div class="availability-grid"><div></div>'+Array.from({length:7},(_,i)=>`<strong>ح${i+1}</strong>`).join('');
-    for(let d=1;d<=5;d++){
-      html+=`<strong>${DAYS[d]}</strong>`;
-      for(let p=1;p<=7;p++){ const pref=map.get(`${d}-${p}`)||'available'; html+=`<button type="button" class="availability-cell pref-${pref}" data-day="${d}" data-period="${p}" data-pref="${pref}">${prefLabel(pref)}</button>`; }
-    }
-    html+='</div>'; $('#availabilityGrid').innerHTML=html;
-    $$('.availability-cell').forEach(b=>b.addEventListener('click',()=>{ const order=['available','preferred','avoid','blocked']; const n=order[(order.indexOf(b.dataset.pref)+1)%order.length]; b.dataset.pref=n; b.className=`availability-cell pref-${n}`; b.textContent=prefLabel(n); }));
+  const teacherOptions = state.teachers.map(t => `<option value="${t.id}">${safeText(t.name)}${t.specialization ? ` — ${safeText(t.specialization)}` : ''}</option>`).join('');
+  showModal(modal('تخصيص جدول المدرسين', `
+    <div class="teacher-pref-panel">
+      <div class="field"><label>اسم المدرس</label><select id="availabilityTeacher">${teacherOptions}</select></div>
+      <div id="teacherAssignmentSummary" class="notice small"></div>
+      <div class="pref-section"><h4>أيام التفرغ</h4><p class="muted">لن يضع النظام أي حصة للمدرس في الأيام المحددة.</p><div class="choice-row">${[1,2,3,4,5].map(d=>`<label class="choice-chip"><input type="checkbox" data-off-day="${d}"><span>${DAYS[d]}</span></label>`).join('')}</div></div>
+      <div class="pref-section"><h4>الحصص المستثناة</h4><p class="muted">تُمنع هذه الحصص في جميع أيام الدوام.</p><div class="choice-row">${Array.from({length:7},(_,i)=>`<label class="choice-chip"><input type="checkbox" data-blocked-period="${i+1}"><span>الحصة ${i+1}</span></label>`).join('')}</div></div>
+      <div class="pref-section"><h4>الحصص المفضلة</h4><p class="muted">يحاول المولد الالتزام بالنطاق قدر الإمكان، وهو تفضيل وليس منعاً.</p><div class="form-grid"><div class="field"><label>من الحصة</label><select id="preferredFrom"><option value="">بدون تفضيل</option>${Array.from({length:7},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></div><div class="field"><label>إلى الحصة</label><select id="preferredTo"><option value="">بدون تفضيل</option>${Array.from({length:7},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></div></div></div>
+      <details class="pref-section"><summary><strong>استثناءات يومية متقدمة</strong> — عند الحاجة فقط</summary><p class="muted">لمنع حصة في يوم محدد فقط.</p><div class="day-exception-grid">${[1,2,3,4,5].map(d=>`<div class="day-exception-row"><strong>${DAYS[d]}</strong><div class="choice-row">${Array.from({length:7},(_,i)=>`<label class="choice-chip compact"><input type="checkbox" data-day-exception="${d}" data-period="${i+1}"><span>${i+1}</span></label>`).join('')}</div></div>`).join('')}</div></details>
+      <div class="pref-summary" id="prefSummary"></div>
+      <button class="btn btn-primary" id="saveAvailability">حفظ تخصيص المدرس</button>
+    </div>`));
+
+  const updateSummary=()=>{
+    const teacher=teacherById($('#availabilityTeacher').value);
+    const off=$$('[data-off-day]:checked').map(x=>DAYS[+x.dataset.offDay]);
+    const blocked=$$('[data-blocked-period]:checked').map(x=>x.dataset.blockedPeriod);
+    const pf=$('#preferredFrom').value,pt=$('#preferredTo').value,parts=[];
+    if(off.length)parts.push(`أيام التفرغ: ${off.join('، ')}`);
+    if(blocked.length)parts.push(`الحصص المستثناة: ${blocked.join('، ')}`);
+    if(pf&&pt)parts.push(`يفضل الحصص من ${pf} إلى ${pt}`);
+    $('#prefSummary').innerHTML=`<strong>${safeText(teacher?.name||'')}</strong><br>${parts.length?parts.map(safeText).join(' • '):'لا توجد قيود عامة حالياً.'}`;
   };
-  $('#availabilityTeacher').addEventListener('change',draw); draw();
+  const draw=()=>{
+    const tid=$('#availabilityTeacher').value,teacher=teacherById(tid);
+    const rows=state.teacherAvailability.filter(x=>String(x.teacher_id)===String(tid));
+    const map=new Map(rows.map(x=>[`${x.day_of_week}-${x.period_number}`,x.preference]));
+    const tas=state.assignments.filter(a=>String(a.teacher_id)===String(tid)&&a.status==='active');
+    const desc=tas.map(a=>{const sub=subjectById(a.subject_id),sec=sectionById(a.section_id);return `${sub?.name||''} — ${sec?.grade||''} / ${sec?.name||''}`;});
+    $('#teacherAssignmentSummary').innerHTML=`<strong>التخصص:</strong> ${safeText(teacher?.specialization||'غير محدد')}<br><strong>التكليفات:</strong> ${desc.length?desc.map(safeText).join('، '):'لا توجد تكليفات فعالة'}`;
+    $$('[data-off-day]').forEach(x=>x.checked=Array.from({length:7},(_,i)=>i+1).every(p=>map.get(`${x.dataset.offDay}-${p}`)==='blocked'));
+    $$('[data-blocked-period]').forEach(x=>x.checked=[1,2,3,4,5].every(d=>map.get(`${d}-${x.dataset.blockedPeriod}`)==='blocked'));
+    $$('[data-day-exception]').forEach(x=>x.checked=map.get(`${x.dataset.dayException}-${x.dataset.period}`)==='blocked');
+    const pp=[];for(let p=1;p<=7;p++)if([1,2,3,4,5].some(d=>map.get(`${d}-${p}`)==='preferred'))pp.push(p);
+    $('#preferredFrom').value=pp.length?Math.min(...pp):'';$('#preferredTo').value=pp.length?Math.max(...pp):'';updateSummary();
+  };
+  $('#availabilityTeacher').addEventListener('change',draw);
+  $$('[data-off-day], [data-blocked-period], [data-day-exception], #preferredFrom, #preferredTo').forEach(el=>el.addEventListener('change',updateSummary));
+  draw();
   $('#saveAvailability').addEventListener('click',async()=>{
     const tid=$('#availabilityTeacher').value;
-    const rows=$$('.availability-cell').filter(b=>b.dataset.pref!=='available').map(b=>({teacher_id:tid,day_of_week:+b.dataset.day,period_number:+b.dataset.period,preference:b.dataset.pref}));
-    const del=await supabaseClient.from('teacher_availability').delete().eq('teacher_id',tid); if(del.error) return alert(del.error.message);
-    if(rows.length){ const ins=await supabaseClient.from('teacher_availability').insert(rows); if(ins.error) return alert(ins.error.message); }
-    await loadTimetablePreferences(); alert('تم حفظ تخصيص المدرس.'); draw();
+    const off=new Set($$('[data-off-day]:checked').map(x=>+x.dataset.offDay));
+    const blocked=new Set($$('[data-blocked-period]:checked').map(x=>+x.dataset.blockedPeriod));
+    const exceptions=new Set($$('[data-day-exception]:checked').map(x=>`${x.dataset.dayException}-${x.dataset.period}`));
+    const pf=+$('#preferredFrom').value||0,pt=+$('#preferredTo').value||0;
+    if((pf&&!pt)||(!pf&&pt)||(pf&&pt&&pf>pt))return alert('تحقق من نطاق الحصص المفضلة.');
+    const rows=[];
+    for(let d=1;d<=5;d++)for(let p=1;p<=7;p++){let preference='available';if(off.has(d)||blocked.has(p)||exceptions.has(`${d}-${p}`))preference='blocked';else if(pf&&pt&&p>=pf&&p<=pt)preference='preferred';if(preference!=='available')rows.push({teacher_id:tid,day_of_week:d,period_number:p,preference});}
+    const del=await supabaseClient.from('teacher_availability').delete().eq('teacher_id',tid);if(del.error)return alert('تعذر حفظ التخصيص: '+del.error.message);
+    if(rows.length){const ins=await supabaseClient.from('teacher_availability').insert(rows);if(ins.error)return alert('تعذر حفظ التخصيص: '+ins.error.message);}
+    await loadTimetablePreferences();alert('تم حفظ تخصيص المدرس بنجاح.');draw();
   });
 }
 function prefLabel(p){ return ({available:'متاح',preferred:'مفضّل',avoid:'غير مفضّل',blocked:'ممنوع'})[p]||p; }
