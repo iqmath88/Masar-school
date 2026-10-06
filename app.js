@@ -165,7 +165,10 @@ async function mount() {
     if (error) throw error;
 
     if (data.session?.user) {
-      await establishUser(data.session.user);
+      await Promise.race([
+        establishUser(data.session.user),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('انتهت مهلة تحميل بيانات النظام. تحقق من تحديث قاعدة البيانات ثم أعد المحاولة.')), 20000))
+      ]);
     } else {
       state.loading = false;
       state.user = null;
@@ -183,6 +186,7 @@ async function mount() {
   } catch (err) {
     console.error(err);
     state.loading = false;
+    state.user = null;
     state.error = err?.message || 'تعذر الاتصال بـ Supabase';
     render();
   }
