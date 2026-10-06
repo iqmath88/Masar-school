@@ -1,7 +1,7 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
-const MASAR_VERSION = '1.4.0';
+const MASAR_VERSION = '1.5.0';
 const MASAR_DB_TARGET = 3;
 
 const DAYS = {
@@ -1872,36 +1872,57 @@ async function saveAssignment(event) {
    TIMETABLE CRUD
 ========================================================= */
 
+let timetableDisplayMode = 'school';
+let timetableDisplayTeacher = '';
+let timetableDisplaySection = '';
+
+function timetableCellContent(row, mode) {
+  if (!row) return '<span class="tt-empty">—</span>';
+  if (mode === 'teacher') return `<strong>${safeText(row.grade)} / ${safeText(row.section)}</strong><small>${safeText(row.subject)}</small>`;
+  if (mode === 'section') return `<strong>${safeText(row.subject)}</strong><small>${safeText(row.teacher)}</small>`;
+  return `<strong>${safeText(row.subject)}</strong><small>${safeText(row.teacher)}</small>`;
+}
+
+function personalTimetableGrid(rows, mode) {
+  const days=[1,2,3,4,5];
+  return `<div class="tt-scroll"><table class="tt-personal"><thead><tr><th class="tt-corner">اليوم / الحصة</th>${Array.from({length:7},(_,i)=>`<th>الحصة ${i+1}</th>`).join('')}</tr></thead><tbody>${days.map(d=>`<tr><th>${DAYS[d]}</th>${Array.from({length:7},(_,i)=>{const r=rows.find(x=>Number(x.dayOfWeek)===d&&Number(x.period)===i+1);return `<td>${timetableCellContent(r,mode)}</td>`}).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+
+function schoolTimetableGrid() {
+  const days=[1,2,3,4,5];
+  const sections=[...new Map(state.timetable.map(r=>[`${r.grade}|||${r.section}`,{grade:r.grade,section:r.section}])).values()]
+    .sort((a,b)=>(a.grade+' '+a.section).localeCompare(b.grade+' '+b.section,'ar'));
+  if(!sections.length) return '<div class="notice">لا توجد بيانات جدول بعد.</div>';
+  const head1=days.map(d=>`<th colspan="7" class="tt-day-group">${DAYS[d]}</th>`).join('');
+  const head2=days.map(()=>Array.from({length:7},(_,i)=>`<th>${i+1}</th>`).join('')).join('');
+  const body=sections.map(sec=>`<tr><th class="tt-section-name">${safeText(sec.grade)} / ${safeText(sec.section)}</th>${days.map(d=>Array.from({length:7},(_,i)=>{const r=state.timetable.find(x=>x.grade===sec.grade&&x.section===sec.section&&Number(x.dayOfWeek)===d&&Number(x.period)===i+1);return `<td>${r?`<strong>${safeText(r.subject)}</strong><small>${safeText(r.teacher)}</small>`:'<span class="tt-empty">—</span>'}</td>`}).join('')).join('')}</tr>`).join('');
+  return `<div class="tt-scroll tt-school-wrap"><table class="tt-school"><thead><tr><th rowspan="2" class="tt-section-name">الصف / الشعبة</th>${head1}</tr><tr>${head2}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
 function timetableView() {
   if (!isAdmin()) return denied();
+  const teacherOptions=[...new Map(state.timetable.map(r=>[String(r.teacherId),r.teacher])).entries()].sort((a,b)=>a[1].localeCompare(b[1],'ar')).map(([id,n])=>`<option value="${id}" ${String(timetableDisplayTeacher)===id?'selected':''}>${safeText(n)}</option>`).join('');
+  const sectionOptions=[...new Map(state.timetable.map(r=>[`${r.grade}|||${r.section}`,`${r.grade} / ${r.section}`])).entries()].sort((a,b)=>a[1].localeCompare(b[1],'ar')).map(([id,n])=>`<option value="${safeText(id)}" ${timetableDisplaySection===id?'selected':''}>${safeText(n)}</option>`).join('');
+  let grid='';
+  if(timetableDisplayMode==='teacher'){
+    if(!timetableDisplayTeacher && teacherOptions){const first=state.timetable.find(Boolean); timetableDisplayTeacher=first?String(first.teacherId):'';}
+    grid=personalTimetableGrid(state.timetable.filter(r=>String(r.teacherId)===String(timetableDisplayTeacher)),'teacher');
+  } else if(timetableDisplayMode==='section'){
+    if(!timetableDisplaySection && state.timetable.length) timetableDisplaySection=`${state.timetable[0].grade}|||${state.timetable[0].section}`;
+    const [g='',sec='']=timetableDisplaySection.split('|||'); grid=personalTimetableGrid(state.timetable.filter(r=>r.grade===g&&r.section===sec),'section');
+  } else grid=schoolTimetableGrid();
 
   return `
-    <div class="page-title">
-      <h1>جدول الحصص الذكي</h1>
-      <div class="toolbar">
-        <button class="btn btn-primary" data-action="generate-timetable">⚡ إنشاء تلقائي</button>
-        <button class="btn btn-soft" data-action="teacher-availability">⚙ تخصيص المدرسين</button>
-        <button class="btn btn-soft" data-action="add-timetable">+ إضافة حصة يدوياً</button>
-        <button class="btn btn-soft" data-action="print-timetable">🖨️ طباعة وتصدير</button>
-      </div>
-    </div>
-
-    <div class="notice">
-      ينشئ مسار الجدول آلياً مع منع تعارض المدرس والشعبة، واحترام الأوقات الممنوعة، ثم يحاول تحقيق الأوقات المفضلة. يمكن قفل أي حصة قبل إعادة التوليد.
-    </div>
-
-    <div class="card">
-      ${table(
-        state.timetable,
-        ['اليوم', 'الحصة', 'المدرس', 'المادة', 'الصف', 'الشعبة', 'القاعة', 'الحالة', 'إجراءات'],
-        r => [
-          safeText(r.day), r.period, safeText(r.teacher), safeText(r.subject), safeText(r.grade), safeText(r.section), safeText(r.room),
-          r.isLocked ? '<span class="badge badge-warning">🔒 مقفلة</span>' : '<span class="badge badge-success">مرنة</span>',
-          `<button class="btn btn-soft btn-sm" data-toggle-lock="${r.id}" data-locked="${r.isLocked ? '1':'0'}">${r.isLocked ? 'فتح القفل' : 'قفل'}</button> <button class="btn btn-soft btn-sm" data-delete-timetable="${r.id}">حذف</button>`
-        ]
-      )}
-    </div>
-  `;
+    <div class="page-title"><h1>جدول الحصص الذكي</h1><div class="toolbar">
+      <button class="btn btn-primary" data-action="generate-timetable">⚡ إنشاء تلقائي</button><button class="btn btn-soft" data-action="teacher-availability">⚙ تخصيص المدرسين</button><button class="btn btn-soft" data-action="add-timetable">+ إضافة حصة يدوياً</button><button class="btn btn-soft" data-action="print-timetable">🖨️ طباعة وتصدير</button>
+    </div></div>
+    <div class="notice">ينشئ مسار الجدول آلياً مع منع تعارض المدرس والشعبة واحترام تخصيصات المدرسين. اختر طريقة العرض أدناه.</div>
+    <div class="card tt-view-card">
+      <div class="tt-tabs"><button class="btn ${timetableDisplayMode==='school'?'btn-primary':'btn-soft'}" data-tt-view="school">الجدول العام للمدرسة</button><button class="btn ${timetableDisplayMode==='teacher'?'btn-primary':'btn-soft'}" data-tt-view="teacher">جدول المدرس</button><button class="btn ${timetableDisplayMode==='section'?'btn-primary':'btn-soft'}" data-tt-view="section">جدول الشعبة</button></div>
+      ${timetableDisplayMode==='teacher'?`<div class="tt-picker"><label>المدرس</label><select id="ttTeacherSelect"><option value="">اختر المدرس</option>${teacherOptions}</select></div>`:''}
+      ${timetableDisplayMode==='section'?`<div class="tt-picker"><label>الشعبة</label><select id="ttSectionSelect"><option value="">اختر الشعبة</option>${sectionOptions}</select></div>`:''}
+      ${grid}
+    </div>`;
 }
 
 function openTimetablePrintModal() {
@@ -1922,18 +1943,14 @@ function openTimetablePrintModal() {
 }
 
 function printTimetableReport(type, teacherId, sectionKey) {
-  let rows=[...state.timetable], title='الجدول العام للمدرسة';
-  if(type==='teacher'){ if(!teacherId)return alert('اختر المدرس أولاً.'); rows=rows.filter(r=>String(r.teacherId)===String(teacherId)); title='جدول المدرس — '+(rows[0]?.teacher||''); }
-  if(type==='section'){ if(!sectionKey)return alert('اختر الشعبة أولاً.'); const [g,s]=sectionKey.split('|||'); rows=rows.filter(r=>r.grade===g&&r.section===s); title='جدول الشعبة — '+g+' / '+s; }
+  let rows=[...state.timetable], title='الجدول العام للمدرسة', content='';
+  if(type==='teacher'){ if(!teacherId)return alert('اختر المدرس أولاً.'); rows=rows.filter(r=>String(r.teacherId)===String(teacherId)); title='جدول المدرس — '+(rows[0]?.teacher||''); content=personalTimetableGrid(rows,'teacher'); }
+  else if(type==='section'){ if(!sectionKey)return alert('اختر الشعبة أولاً.'); const [g,sec]=sectionKey.split('|||'); rows=rows.filter(r=>r.grade===g&&r.section===sec); title='جدول الشعبة — '+g+' / '+sec; content=personalTimetableGrid(rows,'section'); }
+  else { content=schoolTimetableGrid(); }
   if(!rows.length)return alert('لا توجد حصص ضمن الاختيار.');
-  const maxPeriod=Math.max(1,...rows.map(r=>Number(r.period)||0));
-  const days=[1,2,3,4,5,6,7].filter(d=>rows.some(r=>Number(r.dayOfWeek)===d));
-  const cell=(d,p)=>{const xs=rows.filter(r=>Number(r.dayOfWeek)===d&&Number(r.period)===p);if(!xs.length)return '';return xs.map(r=> type==='teacher' ? `<b>${safeText(r.subject)}</b><small>${safeText(r.grade)} / ${safeText(r.section)}</small>` : type==='section' ? `<b>${safeText(r.subject)}</b><small>${safeText(r.teacher)}</small>` : `<b>${safeText(r.grade)} / ${safeText(r.section)}</b><small>${safeText(r.subject)} — ${safeText(r.teacher)}</small>`).join('<hr>')};
-  const head=Array.from({length:maxPeriod},(_,i)=>`<th>الحصة ${i+1}</th>`).join('');
-  const body=days.map(d=>`<tr><th class="day">${DAYS[d]}</th>${Array.from({length:maxPeriod},(_,i)=>`<td>${cell(d,i+1)}</td>`).join('')}</tr>`).join('');
   const year=safeText(activeYear()?.name||'');
   const w=window.open('','_blank'); if(!w)return alert('تعذر فتح معاينة الطباعة. اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.');
-  w.document.write(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>${safeText(title)}</title><style>@page{size:A4 landscape;margin:8mm}*{box-sizing:border-box}body{font-family:Tahoma,Arial,sans-serif;color:#111;margin:0}.head{text-align:center;margin-bottom:10px}.head h1{font-size:20px;margin:0 0 4px}.meta{font-size:12px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #333;padding:5px;text-align:center;vertical-align:middle;font-size:10px;overflow-wrap:anywhere}thead th,.day{background:#eee;font-weight:700}.day{width:68px}td b{display:block;font-size:10px}td small{display:block;margin-top:3px;font-size:8px}hr{border:0;border-top:1px dashed #999;margin:4px 0}.actions{text-align:center;margin:10px 0}.actions button{font-size:15px;padding:8px 18px}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}tr{break-inside:avoid}}</style></head><body><div class="actions"><button onclick="window.print()">🖨️ طباعة / حفظ PDF</button></div><div class="head"><h1>مسار لإدارة المدارس — ${safeText(title)}</h1><div class="meta">العام الدراسي: ${year} • إصدار مسار ${MASAR_VERSION}</div></div><table><thead><tr><th>اليوم</th>${head}</tr></thead><tbody>${body}</tbody></table></body></html>`); w.document.close();
+  w.document.write(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>${safeText(title)}</title><style>@page{size:A3 landscape;margin:7mm}*{box-sizing:border-box}body{font-family:Tahoma,Arial,sans-serif;color:#111;margin:0}.actions{text-align:center;margin:8px}.head{text-align:center;margin-bottom:8px}.head h1{font-size:20px;margin:0 0 4px}.meta{font-size:11px}.tt-scroll{overflow:visible}.tt-personal,.tt-school{width:100%;border-collapse:collapse;table-layout:fixed}.tt-personal th,.tt-personal td,.tt-school th,.tt-school td{border:1px solid #222;text-align:center;vertical-align:middle;padding:4px;font-size:9px}.tt-personal thead th,.tt-personal tbody th,.tt-school thead th,.tt-section-name{background:#eee;font-weight:700}.tt-personal td{height:58px}.tt-personal strong,.tt-school strong{display:block;font-size:9px}.tt-personal small,.tt-school small{display:block;font-size:7px;margin-top:2px}.tt-school{min-width:0}.tt-school td{height:38px;padding:2px}.tt-day-group{font-size:11px!important}.tt-section-name{width:95px}.tt-empty{color:#aaa}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}tr{break-inside:avoid}}</style></head><body><div class="actions"><button onclick="window.print()">🖨️ طباعة / حفظ PDF</button></div><div class="head"><h1>مسار لإدارة المدارس — ${safeText(title)}</h1><div class="meta">العام الدراسي: ${year} • إصدار مسار ${MASAR_VERSION}</div></div>${content}</body></html>`); w.document.close();
 }
 
 async function loadTimetablePreferences(retry = true) {
@@ -3158,6 +3175,9 @@ function bind() {
   $('[data-action="generate-timetable"]')?.addEventListener('click', openGenerateTimetableModal);
   $('[data-action="teacher-availability"]')?.addEventListener('click', openTeacherAvailabilityModal);
   $('[data-action="print-timetable"]')?.addEventListener('click', openTimetablePrintModal);
+  $$('[data-tt-view]').forEach(b=>b.addEventListener('click',()=>{timetableDisplayMode=b.dataset.ttView;render();}));
+  $('#ttTeacherSelect')?.addEventListener('change',e=>{timetableDisplayTeacher=e.target.value;render();});
+  $('#ttSectionSelect')?.addEventListener('change',e=>{timetableDisplaySection=e.target.value;render();});
   $('[data-action="add-year"]')?.addEventListener('click', openYearModal);
 
   $('[data-action="record-attendance"]')?.addEventListener(
