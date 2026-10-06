@@ -1,7 +1,7 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
-const MASAR_VERSION = '1.3.0';
+const MASAR_VERSION = '1.3.1';
 const MASAR_DB_TARGET = 3;
 
 const DAYS = {
@@ -1898,19 +1898,41 @@ function timetableView() {
   `;
 }
 
-async function loadTimetablePreferences() {
+async function loadTimetablePreferences(retry = true) {
+  // v1.3.1: verify the migration marker first and preserve the real Supabase error.
+  const meta = await supabaseClient.from('system_meta').select('db_version').eq('id', 1).maybeSingle();
+  if (meta.error) throw Object.assign(new Error('تعذر قراءة إصدار قاعدة البيانات: ' + meta.error.message), { code: meta.error.code });
+  const dbVersion = Number(meta.data?.db_version || 0);
+  if (dbVersion < 3) throw Object.assign(new Error('قاعدة البيانات تحتاج تحديث Smart Timetable (الإصدار 3).'), { code: 'MASAR_DB_OLD' });
+
   const [a, r] = await Promise.all([
     supabaseClient.from('teacher_availability').select('teacher_id, day_of_week, period_number, preference'),
     supabaseClient.from('assignment_timetable_rules').select('assignment_id, weekly_periods')
   ]);
-  if (a.error) throw a.error;
-  if (r.error) throw r.error;
+  const err = a.error || r.error;
+  if (err) {
+    // PostgREST can briefly retain an old schema cache immediately after a migration.
+    if (retry && ['PGRST205','42P01'].includes(String(err.code || ''))) {
+      await new Promise(resolve => setTimeout(resolve, 900));
+      return loadTimetablePreferences(false);
+    }
+    throw Object.assign(new Error(err.message || 'تعذر تحميل إعدادات الجدول الذكي.'), { code: err.code, details: err.details, hint: err.hint });
+  }
   state.teacherAvailability = a.data || [];
   state.timetableRules = r.data || [];
 }
 
+function timetableSetupError(error) {
+  console.error('Smart Timetable setup error', error);
+  const code = String(error?.code || '');
+  if (code === 'MASAR_DB_OLD') return error.message;
+  if (['PGRST205','42P01'].includes(code)) return 'تم تحديث قاعدة البيانات، لكن واجهة Supabase لم تحدّث مخططها بعد. أعد تحميل الصفحة ثم حاول مرة أخرى.';
+  if (['42501','PGRST301'].includes(code)) return 'قاعدة البيانات محدثة، لكن حسابك لا يملك صلاحية الوصول إلى إعدادات الجدول الذكي. الخطأ: ' + (error?.message || code);
+  return 'قاعدة البيانات محدثة، لكن تعذر تحميل إعدادات الجدول الذكي. الخطأ: ' + (error?.message || code || 'غير معروف');
+}
+
 async function openTeacherAvailabilityModal() {
-  try { await loadTimetablePreferences(); } catch (e) { alert('يجب تنفيذ تحديث قاعدة البيانات v1.3.0 أولاً.'); return; }
+  try { await loadTimetablePreferences(); } catch (e) { alert(timetableSetupError(e)); return; }
   if (!state.teachers.length) return alert('لا يوجد مدرسون.');
   const teacherOptions = state.teachers.map(t=>`<option value="${t.id}">${safeText(t.name)}</option>`).join('');
   showModal(modal('تخصيص أوقات المدرسين', `
@@ -1942,7 +1964,7 @@ async function openTeacherAvailabilityModal() {
 function prefLabel(p){ return ({available:'متاح',preferred:'مفضّل',avoid:'غير مفضّل',blocked:'ممنوع'})[p]||p; }
 
 async function openGenerateTimetableModal(){
-  try { await loadTimetablePreferences(); } catch(e){ alert('يجب تنفيذ UPDATE_DATABASE_v1.3.0.sql أولاً.'); return; }
+  try { await loadTimetablePreferences(); } catch(e){ alert(timetableSetupError(e)); return; }
   const active=state.assignments.filter(a=>a.status==='active' && (!activeYear() || String(a.academic_year_id)===String(activeYear().id)));
   if(!active.length) return alert('لا توجد تكليفات فعالة.');
   const ruleMap=new Map(state.timetableRules.map(r=>[String(r.assignment_id),r.weekly_periods]));
