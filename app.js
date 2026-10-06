@@ -1,7 +1,7 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
-const MASAR_VERSION = '1.6.0';
+const MASAR_VERSION = '1.6.1';
 const MASAR_DB_TARGET = 3;
 
 const DAYS = {
@@ -1989,7 +1989,7 @@ async function loadTimetablePreferences(retry = true) {
   const [a, r, st] = await Promise.all([
     supabaseClient.from('teacher_availability').select('teacher_id, day_of_week, period_number, preference'),
     supabaseClient.from('assignment_timetable_rules').select('assignment_id, weekly_periods'),
-    supabaseClient.from('school_timetable_settings').select('day_of_week, periods_count').order('day_of_week')
+    supabaseClient.from('timetable_day_settings').select('day_of_week, periods_count, is_working_day').eq('academic_year_id', activeYear()?.id).order('day_of_week')
   ]);
   const err = a.error || r.error || st.error;
   if (err) {
@@ -2009,7 +2009,7 @@ function timetableSetupError(error) {
   console.error('Smart Timetable setup error', error);
   const code = String(error?.code || '');
   if (code === 'MASAR_DB_OLD') return error.message;
-  if (['PGRST205','42P01'].includes(code)) return 'تم تحديث قاعدة البيانات، لكن واجهة Supabase لم تحدّث مخططها بعد. أعد تحميل الصفحة ثم حاول مرة أخرى.';
+  if (['PGRST205','42P01'].includes(code)) return 'يوجد جزء ناقص من جداول الجدول الذكي في قاعدة البيانات. نفّذ UPDATE_DATABASE_v1.6.1.sql ثم أعد المحاولة. التفاصيل: ' + (error?.message || code);
   if (['42501','PGRST301'].includes(code)) return 'قاعدة البيانات محدثة، لكن حسابك لا يملك صلاحية الوصول إلى إعدادات الجدول الذكي. الخطأ: ' + (error?.message || code);
   return 'قاعدة البيانات محدثة، لكن تعذر تحميل إعدادات الجدول الذكي. الخطأ: ' + (error?.message || code || 'غير معروف');
 }
@@ -2075,7 +2075,7 @@ function prefLabel(p){ return ({available:'متاح',preferred:'مفضّل',avoi
 async function openTimetableSettingsModal(){
   try{await loadTimetablePreferences();}catch(e){alert(timetableSetupError(e));return;}
   showModal(modal('إعداد أيام الدوام وعدد الحصص',`<div class="notice">حدد عدد الحصص الفعلي لكل يوم. القيمة 0 تعني أن اليوم ليس يوم دوام.</div><div class="day-period-settings">${[1,2,3,4,5].map(d=>`<div><strong>${DAYS[d]}</strong><input type="number" min="0" max="12" value="${timetableDayPeriods(d)}" data-day-periods="${d}"></div>`).join('')}</div><button class="btn btn-primary" id="saveDayPeriods">حفظ الإعدادات</button>`));
-  $('#saveDayPeriods').addEventListener('click',async()=>{const rows=$$('[data-day-periods]').map(i=>({day_of_week:+i.dataset.dayPeriods,periods_count:Math.max(0,Math.min(12,+i.value||0))}));const {error}=await supabaseClient.from('school_timetable_settings').upsert(rows,{onConflict:'day_of_week'});if(error)return alert(error.message);state.timetableSettings=Object.fromEntries(rows.map(x=>[x.day_of_week,x.periods_count]));$('.modal-backdrop')?.remove();render();});
+  $('#saveDayPeriods').addEventListener('click',async()=>{const yearId=activeYear()?.id;if(!yearId)return alert('لا توجد سنة دراسية فعالة.');const rows=$$('[data-day-periods]').map(i=>({academic_year_id:yearId,day_of_week:+i.dataset.dayPeriods,periods_count:Math.max(0,Math.min(12,+i.value||0)),is_working_day:(+i.value||0)>0}));const {error}=await supabaseClient.from('timetable_day_settings').upsert(rows,{onConflict:'academic_year_id,day_of_week'});if(error)return alert(error.message);state.timetableSettings=Object.fromEntries(rows.map(x=>[x.day_of_week,x.periods_count]));$('.modal-backdrop')?.remove();render();});
 }
 async function openGenerateTimetableModal(){
   try { await loadTimetablePreferences(); } catch(e){ alert(timetableSetupError(e)); return; }
