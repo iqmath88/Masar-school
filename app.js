@@ -1,7 +1,7 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
-const MASAR_VERSION = '1.3.1';
+const MASAR_VERSION = '1.3.2';
 const MASAR_DB_TARGET = 3;
 
 const DAYS = {
@@ -1877,6 +1877,7 @@ function timetableView() {
         <button class="btn btn-primary" data-action="generate-timetable">⚡ إنشاء تلقائي</button>
         <button class="btn btn-soft" data-action="teacher-availability">⚙ تخصيص المدرسين</button>
         <button class="btn btn-soft" data-action="add-timetable">+ إضافة حصة يدوياً</button>
+        <button class="btn btn-soft" data-action="print-timetable">🖨️ طباعة وتصدير</button>
       </div>
     </div>
 
@@ -1896,6 +1897,38 @@ function timetableView() {
       )}
     </div>
   `;
+}
+
+function openTimetablePrintModal() {
+  if (!state.timetable.length) return alert('لا يوجد جدول حصص للطباعة بعد.');
+  const teacherOptions = [...new Map(state.timetable.map(r => [String(r.teacherId), r.teacher])).entries()].sort((a,b)=>a[1].localeCompare(b[1],'ar')).map(([id,name])=>`<option value="${id}">${safeText(name)}</option>`).join('');
+  const sectionOptions = [...new Map(state.timetable.map(r => [`${r.grade}|||${r.section}`, `${r.grade} / ${r.section}`])).entries()].sort((a,b)=>a[1].localeCompare(b[1],'ar')).map(([id,name])=>`<option value="${safeText(id)}">${safeText(name)}</option>`).join('');
+  showModal(modal('طباعة وتصدير جدول الحصص', `
+    <form id="timetablePrintForm">
+      <div class="field"><label>نوع الجدول</label><select id="printTimetableType"><option value="school">الجدول العام للمدرسة</option><option value="teacher">جدول مدرس</option><option value="section">جدول شعبة</option></select></div>
+      <div class="field" id="printTeacherField" style="display:none"><label>المدرس</label><select id="printTeacherId"><option value="">اختر المدرس</option>${teacherOptions}</select></div>
+      <div class="field" id="printSectionField" style="display:none"><label>الشعبة</label><select id="printSectionId"><option value="">اختر الشعبة</option>${sectionOptions}</select></div>
+      <div class="notice">ستفتح معاينة طباعة رسمية بوضع A4 أفقي. من نافذة الطباعة في iPad يمكنك اختيار حفظ كـ PDF.</div>
+      <button class="btn btn-primary" type="submit">🖨️ فتح معاينة الطباعة</button>
+    </form>`));
+  const type=$('#printTimetableType'), tf=$('#printTeacherField'), sf=$('#printSectionField');
+  type.addEventListener('change',()=>{tf.style.display=type.value==='teacher'?'block':'none';sf.style.display=type.value==='section'?'block':'none';});
+  $('#timetablePrintForm').addEventListener('submit',e=>{e.preventDefault(); printTimetableReport(type.value,$('#printTeacherId')?.value,$('#printSectionId')?.value);});
+}
+
+function printTimetableReport(type, teacherId, sectionKey) {
+  let rows=[...state.timetable], title='الجدول العام للمدرسة';
+  if(type==='teacher'){ if(!teacherId)return alert('اختر المدرس أولاً.'); rows=rows.filter(r=>String(r.teacherId)===String(teacherId)); title='جدول المدرس — '+(rows[0]?.teacher||''); }
+  if(type==='section'){ if(!sectionKey)return alert('اختر الشعبة أولاً.'); const [g,s]=sectionKey.split('|||'); rows=rows.filter(r=>r.grade===g&&r.section===s); title='جدول الشعبة — '+g+' / '+s; }
+  if(!rows.length)return alert('لا توجد حصص ضمن الاختيار.');
+  const maxPeriod=Math.max(1,...rows.map(r=>Number(r.period)||0));
+  const days=[1,2,3,4,5,6,7].filter(d=>rows.some(r=>Number(r.dayOfWeek)===d));
+  const cell=(d,p)=>{const xs=rows.filter(r=>Number(r.dayOfWeek)===d&&Number(r.period)===p);if(!xs.length)return '';return xs.map(r=> type==='teacher' ? `<b>${safeText(r.subject)}</b><small>${safeText(r.grade)} / ${safeText(r.section)}</small>` : type==='section' ? `<b>${safeText(r.subject)}</b><small>${safeText(r.teacher)}</small>` : `<b>${safeText(r.grade)} / ${safeText(r.section)}</b><small>${safeText(r.subject)} — ${safeText(r.teacher)}</small>`).join('<hr>')};
+  const head=Array.from({length:maxPeriod},(_,i)=>`<th>الحصة ${i+1}</th>`).join('');
+  const body=days.map(d=>`<tr><th class="day">${DAYS[d]}</th>${Array.from({length:maxPeriod},(_,i)=>`<td>${cell(d,i+1)}</td>`).join('')}</tr>`).join('');
+  const year=safeText(activeYear()?.name||'');
+  const w=window.open('','_blank'); if(!w)return alert('تعذر فتح معاينة الطباعة. اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.');
+  w.document.write(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>${safeText(title)}</title><style>@page{size:A4 landscape;margin:8mm}*{box-sizing:border-box}body{font-family:Tahoma,Arial,sans-serif;color:#111;margin:0}.head{text-align:center;margin-bottom:10px}.head h1{font-size:20px;margin:0 0 4px}.meta{font-size:12px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #333;padding:5px;text-align:center;vertical-align:middle;font-size:10px;overflow-wrap:anywhere}thead th,.day{background:#eee;font-weight:700}.day{width:68px}td b{display:block;font-size:10px}td small{display:block;margin-top:3px;font-size:8px}hr{border:0;border-top:1px dashed #999;margin:4px 0}.actions{text-align:center;margin:10px 0}.actions button{font-size:15px;padding:8px 18px}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}tr{break-inside:avoid}}</style></head><body><div class="actions"><button onclick="window.print()">🖨️ طباعة / حفظ PDF</button></div><div class="head"><h1>مسار لإدارة المدارس — ${safeText(title)}</h1><div class="meta">العام الدراسي: ${year} • إصدار مسار ${MASAR_VERSION}</div></div><table><thead><tr><th>اليوم</th>${head}</tr></thead><tbody>${body}</tbody></table></body></html>`); w.document.close();
 }
 
 async function loadTimetablePreferences(retry = true) {
@@ -3093,6 +3126,7 @@ function bind() {
   $('[data-action="add-timetable"]')?.addEventListener('click', openTimetableModal);
   $('[data-action="generate-timetable"]')?.addEventListener('click', openGenerateTimetableModal);
   $('[data-action="teacher-availability"]')?.addEventListener('click', openTeacherAvailabilityModal);
+  $('[data-action="print-timetable"]')?.addEventListener('click', openTimetablePrintModal);
   $('[data-action="add-year"]')?.addEventListener('click', openYearModal);
 
   $('[data-action="record-attendance"]')?.addEventListener(
