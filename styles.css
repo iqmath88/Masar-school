@@ -58,3 +58,19 @@ body:has(.modal-backdrop){overflow:hidden;}
   .tt-entry{background:hsl(var(--tt-h) 70% 91%)!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
   .tt-personal th,.tt-school th{background:#eef1f5!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
 }
+
+/* Masar v1.7.1 — compact timetable cells + print fidelity */
+.tt-school{table-layout:fixed!important}
+.tt-school td{height:58px!important;padding:2px!important;overflow:hidden!important}
+.tt-school th:not(.tt-section-name){min-width:74px;width:74px}
+.tt-entry{width:100%!important;height:100%!important;min-height:0!important;border-radius:4px!important;padding:3px 2px!important;overflow:hidden!important;box-sizing:border-box!important;gap:1px}
+.tt-entry strong{font-size:10px!important;line-height:1.15!important;max-width:100%;white-space:normal;overflow-wrap:anywhere;word-break:normal;text-align:center}
+.tt-entry small{font-size:8px!important;line-height:1.15!important;max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:center}
+.tt-personal .tt-entry strong{font-size:12px!important}.tt-personal .tt-entry small{font-size:9px!important}
+.btn-sm{padding:7px 9px!important;font-size:12px!important}
+@media print{
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+  .tt-entry{background:hsl(var(--tt-h) 62% 93%)!important;border-inline-start:3px solid hsl(var(--tt-h) 48% 55%)!important}
+  .tt-school td{height:48px!important;padding:1px!important}
+  .tt-entry strong{font-size:8px!important}.tt-entry small{font-size:7px!important}
+}

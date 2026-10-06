@@ -1,7 +1,7 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
-const MASAR_VERSION = '1.7.0';
+const MASAR_VERSION = '1.7.1';
 const MASAR_DB_TARGET = 3;
 
 const DAYS = {
@@ -689,21 +689,72 @@ function dashboardView() {
    USERS + ACCOUNT CREATION
 ========================================================= */
 
+function credentialsStore(){
+  try { return JSON.parse(localStorage.getItem('masar_teacher_credentials') || '{}'); } catch { return {}; }
+}
+function saveCredential(userId, row){
+  const all=credentialsStore(); all[String(userId || row.username)]={...row, saved_at:new Date().toISOString()};
+  localStorage.setItem('masar_teacher_credentials', JSON.stringify(all));
+}
+function teacherCredential(t){
+  const all=credentialsStore(); return all[String(t.user_id)] || Object.values(all).find(x=>x.username && x.username===(state.profiles||[]).find(p=>String(p.id)===String(t.user_id))?.username) || null;
+}
+const SPECIALIZATION_PREFIXES={
+  'الرياضيات':'math','رياضيات':'math','mathematics':'math','math':'math',
+  'الفيزياء':'phys','فيزياء':'phys','physics':'phys',
+  'الكيمياء':'chem','كيمياء':'chem','chemistry':'chem',
+  'الاحياء':'biol','الأحياء':'biol','احياء':'biol','biology':'biol',
+  'اللغة العربية':'arab','العربية':'arab','عربي':'arab','arabic':'arab',
+  'اللغة الانكليزية':'engl','اللغة الإنجليزية':'engl','الانكليزية':'engl','الإنجليزية':'engl','english':'engl',
+  'التربية الاسلامية':'isla','التربية الإسلامية':'isla','اسلامية':'isla','إسلامية':'isla','islamic':'isla',
+  'الحاسوب':'comp','حاسوب':'comp','computer':'comp',
+  'التاريخ':'hist','تاريخ':'hist','history':'hist',
+  'الجغرافية':'geog','جغرافية':'geog','geography':'geog'
+};
+function specializationPrefix(value=''){
+  const raw=String(value).trim(); const key=raw.toLowerCase();
+  if(SPECIALIZATION_PREFIXES[raw]||SPECIALIZATION_PREFIXES[key]) return SPECIALIZATION_PREFIXES[raw]||SPECIALIZATION_PREFIXES[key];
+  const latin=key.replace(/[^a-z]/g,''); return (latin.slice(0,4)||'teac').padEnd(4,'x').slice(0,4);
+}
+function random4(){ return String(Math.floor(1000+Math.random()*9000)); }
+function generatedTeacherUsername(spec=''){ return `${specializationPrefix(spec)}${random4()}`; }
+function downloadTextFile(filename, content, type='text/plain;charset=utf-8'){
+  const blob=new Blob(['\ufeff'+content],{type}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),500);
+}
+function downloadTeacherCredential(teacherId){
+  const t=teacherById(teacherId); if(!t)return; const p=(state.profiles||[]).find(x=>String(x.id)===String(t.user_id)); const c=teacherCredential(t);
+  if(!c) return alert('لا توجد نسخة محفوظة من الرمز المؤقت لهذا الحساب على هذا الجهاز. أعد تعيين الرمز ثم نزّل البطاقة الجديدة.');
+  const txt=`مسار لإدارة المدارس\nسجل بيانات دخول المدرس\n\nاسم المدرس: ${t.name}\nالتخصص: ${t.specialization||''}\nاسم المستخدم: ${p?.username||c.username||''}\nالرمز المؤقت: ${c.password||''}\n\nتنبيه: الرمز مؤقت ويجب تغييره بعد أول دخول.`;
+  downloadTextFile(`teacher-${(p?.username||c.username||'account')}.txt`,txt);
+}
+function exportTeacherCredentials(){
+  const rows=[['اسم المدرس','التخصص','اسم المستخدم','الرمز المؤقت']];
+  state.teachers.forEach(t=>{const p=(state.profiles||[]).find(x=>String(x.id)===String(t.user_id));const c=teacherCredential(t);rows.push([t.name,t.specialization||'',p?.username||c?.username||'',c?.password||'غير متاح - أعد التعيين']);});
+  const csv=rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');
+  downloadTextFile('Masar-Teacher-Accounts.csv',csv,'text/csv;charset=utf-8');
+}
+async function deleteSchoolUser(profileId, teacherId=''){
+  const p=(state.profiles||[]).find(x=>String(x.id)===String(profileId)); if(!p)return alert('تعذر العثور على الحساب.');
+  if(String(profileId)===String(state.user?.id)) return alert('لا يمكن حذف الحساب الذي تستخدمه حالياً.');
+  if(!confirm(`حذف حساب ${p.full_name} نهائياً؟\nلن يتم حذف السجلات الدراسية التاريخية.`))return;
+  try{
+    const {data,error}=await supabaseClient.functions.invoke('delete-school-user',{body:{user_id:profileId,teacher_id:teacherId||null}}); if(error)throw error; if(!data?.ok)throw new Error(data?.error||'تعذر حذف الحساب.');
+    const all=credentialsStore(); delete all[String(profileId)]; localStorage.setItem('masar_teacher_credentials',JSON.stringify(all));
+    await loadSchoolData();render();
+  }catch(e){alert('تعذر حذف المستخدم: '+(e?.message||'تأكد من نشر وظيفة delete-school-user في Supabase.'));}
+}
 function usersView() {
   if (!isAdmin()) return denied();
   const admins = (state.profiles || []).filter(p => p.role === 'admin');
   return `
-    <div class="page-title"><h1>الحسابات والمستخدمون</h1><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-primary" data-action="add-teacher-account">+ حساب مدرس</button><button class="btn btn-soft" data-action="add-admin-account">+ حساب إدارة</button></div></div>
+    <div class="page-title"><h1>الحسابات والمستخدمون</h1><div class="toolbar"><button class="btn btn-primary" data-action="add-teacher-account">+ حساب مدرس</button><button class="btn btn-soft" data-action="add-admin-account">+ حساب إدارة</button><button class="btn btn-soft" data-action="export-teacher-credentials">⬇ سجل حسابات المدرسين</button></div></div>
     <div class="grid two-col">
-      <div class="card"><h3>حسابات الإدارة</h3>${table(admins,['الاسم','اسم المستخدم','الهاتف','الحالة','إجراءات'],p=>[safeText(p.full_name),safeText(p.username||''),safeText(p.phone||''),p.is_active!==false?'<span class="badge badge-success">فعال</span>':'<span class="badge">موقوف</span>',`<button class="btn btn-soft btn-sm" data-edit-profile="${p.id}">تعديل الملف</button>`])}</div>
-      <div class="card"><h3>حسابات المدرسين</h3>${table(state.teachers,['الاسم','التخصص','الرقم الوظيفي','إجراءات'],t=>[safeText(t.name),safeText(t.specialization||''),safeText(t.employee_code||''),`<button class="btn btn-soft btn-sm" data-edit-teacher="${t.id}">الملف الشخصي</button> <button class="btn btn-soft btn-sm" data-add-assignment="${t.id}">+ تكليف</button>`])}</div>
-    </div><div class="notice" style="margin-top:12px">حسابات الإدارة مستقلة عن المدرسين. إنشاء كلمات المرور وإعادة تعيينها يتم عبر وظيفة خادم آمنة ولا تُحفظ كلمة المرور كنص مكشوف.</div>`;
+      <div class="card"><h3>حسابات الإدارة</h3>${table(admins,['الاسم','اسم المستخدم','الهاتف','الحالة','إجراءات'],p=>[safeText(p.full_name),safeText(p.username||''),safeText(p.phone||''),p.is_active!==false?'<span class="badge badge-success">فعال</span>':'<span class="badge">موقوف</span>',`<button class="btn btn-soft btn-sm" data-edit-profile="${p.id}">تعديل</button> <button class="btn btn-danger btn-sm" data-delete-user="${p.id}">حذف</button>`])}</div>
+      <div class="card"><h3>حسابات المدرسين</h3>${table(state.teachers,['الاسم','التخصص','اسم المستخدم','إجراءات'],t=>{const p=(state.profiles||[]).find(x=>String(x.id)===String(t.user_id));return [safeText(t.name),safeText(t.specialization||''),safeText(p?.username||''),`<button class="btn btn-soft btn-sm" data-edit-teacher="${t.id}">الملف</button> <button class="btn btn-soft btn-sm" data-add-assignment="${t.id}">+ تكليف</button> <button class="btn btn-soft btn-sm" data-download-credential="${t.id}">تنزيل البيانات</button> ${t.user_id?`<button class="btn btn-danger btn-sm" data-delete-user="${t.user_id}" data-delete-teacher="${t.id}">حذف الحساب</button>`:''}`];})}</div>
+    </div><div class="notice" style="margin-top:12px">الرمز المؤقت يُحفظ محلياً على جهاز الإدارة عند إنشاء الحساب فقط. إذا لم يعد متاحاً، أنشئ رمزاً مؤقتاً جديداً بدلاً من محاولة قراءة كلمة المرور الحالية.</div>`;
 }
 
-function randomUsername(name='user') {
-  const base = String(name).trim().toLowerCase().replace(/\s+/g,'.').replace(/[^a-z0-9._-]/g,'') || 'user';
-  return `${base}.${Math.floor(100+Math.random()*900)}`.slice(0,32);
-}
+function randomUsername(name='user') { return `${String(name).toLowerCase().replace(/[^a-z]/g,'').slice(0,4)||'user'}${random4()}`; }
 function randomPassword(){ const chars='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#'; return Array.from({length:12},()=>chars[Math.floor(Math.random()*chars.length)]).join(''); }
 
 function openProfileEditModal(profileId, teacherId='') {
@@ -806,7 +857,8 @@ function openUserAccountModal(role = 'teacher') {
   );
 
   $('#userAccountForm')?.addEventListener('submit', saveUserAccount);
-  $('#generateUsername')?.addEventListener('click',()=>{$('#newUsername').value=randomUsername($('#newUserName')?.value||'user');});
+  $('#generateUsername')?.addEventListener('click',()=>{$('#newUsername').value=isTeacher?generatedTeacherUsername($('#newTeacherSpecialization')?.value||''):randomUsername($('#newUserName')?.value||'admin');});
+  $('#newTeacherSpecialization')?.addEventListener('input',()=>{if(isTeacher) $('#newUsername').value=generatedTeacherUsername($('#newTeacherSpecialization').value);});
   $('#generatePassword')?.addEventListener('click',()=>{const p=randomPassword();$('#newUserPassword').type='text';$('#newUserPassword').value=p;});
 }
 
@@ -876,7 +928,13 @@ async function saveUserAccount(event) {
       );
     }
 
+    const createdUserId = data?.user_id || data?.id || data?.user?.id || username;
+    if(role==='teacher') saveCredential(createdUserId,{username,password,full_name:fullName,specialization:specialization||''});
     await loadSchoolData();
+    if(role==='teacher'){
+      const createdTeacher=state.teachers.find(t=>String(t.user_id)===String(createdUserId)) || state.teachers.find(t=>t.name===fullName);
+      if(createdTeacher) saveCredential(createdTeacher.user_id,{username,password,full_name:fullName,specialization:specialization||''});
+    }
 
     $('.modal-backdrop')?.remove();
     render();
@@ -3193,6 +3251,10 @@ function bind() {
     'click',
     () => openUserAccountModal('admin')
   );
+
+  $('[data-action="export-teacher-credentials"]')?.addEventListener('click', exportTeacherCredentials);
+  $$('[data-download-credential]').forEach(b=>b.addEventListener('click',()=>downloadTeacherCredential(b.dataset.downloadCredential)));
+  $$('[data-delete-user]').forEach(b=>b.addEventListener('click',()=>deleteSchoolUser(b.dataset.deleteUser,b.dataset.deleteTeacher||'')));
 
   $('[data-action="add-student"]')?.addEventListener('click', () => openStudentModal());
   $('[data-action="add-section"]')?.addEventListener('click', () => openSectionModal());
