@@ -1,6 +1,9 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
+const MASAR_VERSION = '1.2.0';
+const MASAR_DB_TARGET = 2;
+
 const DAYS = {
   1: 'الأحد',
   2: 'الاثنين',
@@ -24,7 +27,8 @@ const state = {
   students: [],
   assignments: [],
   timetable: [],
-  exams: []
+  exams: [],
+  systemHealth: { dbVersion: null, status: 'unknown', message: '' }
 };
 
 let supabaseClient = null;
@@ -238,6 +242,7 @@ async function establishUser(authUser) {
   }
 
   await loadSchoolData();
+  await checkSystemCompatibility();
 
   state.loading = false;
   state.error = '';
@@ -408,6 +413,42 @@ async function loadSchoolData() {
     .sort((a, b) => (a.dayOfWeek - b.dayOfWeek) || (a.period - b.period));
 }
 
+
+async function checkSystemCompatibility() {
+  state.systemHealth = { dbVersion: null, status: 'checking', message: 'جارٍ فحص توافق قاعدة البيانات' };
+  try {
+    const { data, error } = await supabaseClient
+      .from('system_meta')
+      .select('db_version')
+      .eq('id', 1)
+      .maybeSingle();
+
+    if (error) {
+      state.systemHealth = {
+        dbVersion: null,
+        status: 'legacy',
+        message: 'قاعدة البيانات تعمل بالمخطط السابق. يلزم ترقية واحدة لتفعيل نظام التحديثات.'
+      };
+      return;
+    }
+
+    const version = Number(data?.db_version || 0);
+    state.systemHealth = version >= MASAR_DB_TARGET
+      ? { dbVersion: version, status: 'ok', message: 'قاعدة البيانات متوافقة مع هذا الإصدار.' }
+      : { dbVersion: version, status: 'update', message: 'يوجد تحديث مطلوب لقاعدة البيانات.' };
+  } catch (error) {
+    console.error('Compatibility check failed', error);
+    state.systemHealth = { dbVersion: null, status: 'unknown', message: 'تعذر التحقق من إصدار قاعدة البيانات.' };
+  }
+}
+
+function systemStatusBadge() {
+  const h = state.systemHealth || {};
+  if (h.status === 'ok') return '<span class="badge badge-success">متوافق</span>';
+  if (h.status === 'legacy' || h.status === 'update') return '<span class="badge badge-warning">يتطلب تهيئة</span>';
+  return '<span class="badge">غير معروف</span>';
+}
+
 /* =========================================================
    RENDER
 ========================================================= */
@@ -532,7 +573,7 @@ function shell() {
         <header class="topbar">
           <div>
             <b>${safeText(academicYearLabel())}</b>
-            <div class="small">ثانوية — نظام إدارة مدرسي</div>
+            <div class="small">ثانوية — نظام إدارة مدرسي · v${MASAR_VERSION}</div>
           </div>
 
           <div class="user">
@@ -2695,6 +2736,17 @@ function settingsView() {
             `
         ]
       )}
+    </div>
+
+    <div class="card">
+      <h3>حالة النظام والتحديثات</h3>
+      <div class="system-status-grid">
+        <div><span class="small">إصدار مسار</span><strong>v${MASAR_VERSION}</strong></div>
+        <div><span class="small">إصدار قاعدة البيانات</span><strong>${state.systemHealth.dbVersion ?? 'قديم'}</strong></div>
+        <div><span class="small">التوافق</span>${systemStatusBadge()}</div>
+      </div>
+      <p>${safeText(state.systemHealth.message || '')}</p>
+      <div class="notice">لأسباب أمنية لا يحتفظ مسار بمفتاح إداري داخل المتصفح. بعد التهيئة الأولى، ستظهر حالة توافق كل إصدار هنا بوضوح قبل استخدامه.</div>
     </div>
 
     <div class="card">
