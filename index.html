@@ -1,64 +1,19 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ar" dir="rtl">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0F172A">
-<meta name="application-version" content="2.3.0">
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icon-180.png">
-<link rel="icon" type="image/png" href="favicon.png">
-<link rel="preload" href="fonts/Tajawal-Regular.woff" as="font" type="font/woff" crossorigin>
-<link rel="preload" href="fonts/Tajawal-Bold.woff" as="font" type="font/woff" crossorigin>
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="مسار التعليم">
-<title>مسار التعليم — منصة المعلم</title>
-
-<link rel="preload" href="katex/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="katex/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="katex/fonts/KaTeX_Size1-Regular.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="katex/fonts/KaTeX_Size2-Regular.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="katex/fonts/KaTeX_Size3-Regular.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="katex/fonts/KaTeX_Size4-Regular.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="katex/katex.min.css">
-<link rel="stylesheet" href="styles.css?v=2.3.0">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#1454c4" />
+  <title>مسار لإدارة المدارس</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-<div id="splash">
-  <img class="splashIcon" src="icon-192.png" alt="مسار التعليم" width="84" height="84">
-  <div class="splashName">مسار التعليم</div>
-  <div class="splashSub">منصة المعلم للمحاضرات والطلبة والاختبارات</div>
-</div>
-<header class="top">
-  <div class="school"><img class="headerBrandIcon" src="icon-192.png" alt=""><div class="schoolIdentity"><span class="appMiniName">مسار التعليم</span><input id="schoolName" class="schoolName" aria-label="اسم المدرسة"></div></div>
-  <div class="hActions">
-    <button id="fsBtn" class="hBtn iconOnly" title="ملء الشاشة">⛶</button>
-    <button id="darkBtn" class="hBtn iconOnly" title="الوضع الليلي">🌙</button>
-    <button id="wsBtn" class="hBtn" title="إدارة المؤسسات">🏫 مؤسساتي</button>
-    <span class="year" id="yearLbl"></span>
-  </div>
-</header>
-<main class="content" id="content"><div class="loading">جارِ تحميل البيانات…</div></main>
-<div id="storageBanner"></div>
-<nav class="tabs" id="tabs"></nav>
-<div id="fabBox"></div>
-<div id="modal"></div>
-<div id="toastBox"></div>
-<div id="printArea"></div>
-<input type="file" id="importFile" accept=".json" style="display:none">
-
-<script src="katex/katex.min.js?v=2.3.0"></script>
-<script src="masar-core.js?v=2.3.0"></script>
-<script src="masar-storage.js?v=2.3.0"></script>
-<script src="masar-print-engine.js?v=2.3.0"></script>
-<script src="masar-dashboard.js?v=2.3.0"></script>
-<script src="masar-document-core.js?v=2.3.0"></script>
-<script src="masar-lectures.js?v=2.3.0"></script>
-<script src="masar-students.js?v=2.3.0"></script>
-<script src="masar-exams.js?v=2.3.0"></script>
-<script src="masar-grades-attendance.js?v=2.3.0"></script>
-<script src="masar-engagement.js?v=2.3.0"></script>
-<script src="masar-app-shell.js?v=2.3.0"></script>
+  <div id="app"></div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

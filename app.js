@@ -1,7 +1,7 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
-const MASAR_VERSION = '1.6.1';
+const MASAR_VERSION = '1.7.0';
 const MASAR_DB_TARGET = 3;
 
 const DAYS = {
@@ -24,6 +24,7 @@ const state = {
   sections: [],
   subjects: [],
   teachers: [],
+  profiles: [],
   students: [],
   assignments: [],
   timetable: [],
@@ -198,6 +199,7 @@ function clearData() {
   state.sections = [];
   state.subjects = [];
   state.teachers = [];
+  state.profiles = [];
   state.students = [];
   state.assignments = [];
   state.timetable = [];
@@ -366,6 +368,14 @@ async function loadSchoolData() {
 
   const profileNames = new Map();
 
+  if (isAdmin()) {
+    const { data: allProfiles, error: allProfilesError } = await supabaseClient
+      .from('profiles')
+      .select('id, full_name, username, role, phone, is_active, created_at')
+      .order('full_name');
+    if (!allProfilesError) state.profiles = allProfiles || [];
+  }
+
   if (isAdmin() && state.teachers.length) {
     const ids = state.teachers.map(t => t.user_id).filter(Boolean);
 
@@ -487,7 +497,7 @@ function loginView() {
 
         <form id="loginForm">
           <div class="field">
-            <label>اسم المستخدم</label>
+            <label>اسم المستخدم</label><button type="button" class="btn btn-soft btn-sm" id="generateUsername">توليد تلقائي</button>
             <input
               id="loginId"
               type="text"
@@ -681,61 +691,32 @@ function dashboardView() {
 
 function usersView() {
   if (!isAdmin()) return denied();
-
+  const admins = (state.profiles || []).filter(p => p.role === 'admin');
   return `
-    <div class="page-title">
-      <h1>الحسابات والمستخدمون</h1>
-
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-primary" data-action="add-teacher-account">
-          + إضافة مدرس
-        </button>
-
-        <button class="btn btn-soft" data-action="add-admin-account">
-          + إضافة إدارة
-        </button>
-      </div>
-    </div>
-
+    <div class="page-title"><h1>الحسابات والمستخدمون</h1><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-primary" data-action="add-teacher-account">+ حساب مدرس</button><button class="btn btn-soft" data-action="add-admin-account">+ حساب إدارة</button></div></div>
     <div class="grid two-col">
-      <div class="card">
-        <h3>المدرسون</h3>
-
-        ${table(
-          state.teachers,
-          ['الاسم', 'التخصص', 'الرقم الوظيفي', 'إجراءات'],
-          teacher => [
-            safeText(teacher.name),
-            safeText(teacher.specialization || ''),
-            safeText(teacher.employee_code || ''),
-            `
-              <button
-                class="btn btn-soft btn-sm"
-                data-add-assignment="${teacher.id}"
-              >
-                إضافة تكليف
-              </button>
-            `
-          ]
-        )}
-      </div>
-
-      <div class="card">
-        <h3>آلية إنشاء الحساب</h3>
-
-        <p>
-          عند إضافة مدرس أو إدارة، يرسل التطبيق الطلب إلى
-          Edge Function آمنة داخل Supabase. كلمة المرور لا تُحفظ
-          في جداول المدرسة، ولا يوجد أي مفتاح سري داخل المتصفح.
-        </p>
-
-        <span class="badge badge-success">
-          إنشاء الحسابات من جهة الخادم
-        </span>
-      </div>
-    </div>
-  `;
+      <div class="card"><h3>حسابات الإدارة</h3>${table(admins,['الاسم','اسم المستخدم','الهاتف','الحالة','إجراءات'],p=>[safeText(p.full_name),safeText(p.username||''),safeText(p.phone||''),p.is_active!==false?'<span class="badge badge-success">فعال</span>':'<span class="badge">موقوف</span>',`<button class="btn btn-soft btn-sm" data-edit-profile="${p.id}">تعديل الملف</button>`])}</div>
+      <div class="card"><h3>حسابات المدرسين</h3>${table(state.teachers,['الاسم','التخصص','الرقم الوظيفي','إجراءات'],t=>[safeText(t.name),safeText(t.specialization||''),safeText(t.employee_code||''),`<button class="btn btn-soft btn-sm" data-edit-teacher="${t.id}">الملف الشخصي</button> <button class="btn btn-soft btn-sm" data-add-assignment="${t.id}">+ تكليف</button>`])}</div>
+    </div><div class="notice" style="margin-top:12px">حسابات الإدارة مستقلة عن المدرسين. إنشاء كلمات المرور وإعادة تعيينها يتم عبر وظيفة خادم آمنة ولا تُحفظ كلمة المرور كنص مكشوف.</div>`;
 }
+
+function randomUsername(name='user') {
+  const base = String(name).trim().toLowerCase().replace(/\s+/g,'.').replace(/[^a-z0-9._-]/g,'') || 'user';
+  return `${base}.${Math.floor(100+Math.random()*900)}`.slice(0,32);
+}
+function randomPassword(){ const chars='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#'; return Array.from({length:12},()=>chars[Math.floor(Math.random()*chars.length)]).join(''); }
+
+function openProfileEditModal(profileId, teacherId='') {
+  const p=(state.profiles||[]).find(x=>String(x.id)===String(profileId));
+  const t=state.teachers.find(x=>String(x.id)===String(teacherId));
+  if(!p && !t) return alert('تعذر العثور على الملف.');
+  const userId=p?.id || t?.user_id; const profile=p || (state.profiles||[]).find(x=>String(x.id)===String(userId));
+  showModal(modal('تعديل الملف الشخصي',`<form id="profileEditForm"><input id="editProfileId" type="hidden" value="${safeText(userId||'')}"><input id="editTeacherId" type="hidden" value="${safeText(t?.id||'')}"><div class="field"><label>الاسم الكامل</label><input id="editProfileName" required value="${safeText(profile?.full_name||t?.name||'')}"></div><div class="field"><label>اسم المستخدم</label><input id="editProfileUsername" dir="ltr" value="${safeText(profile?.username||'')}"></div><div class="field"><label>الهاتف</label><input id="editProfilePhone" value="${safeText(profile?.phone||'')}"></div>${t?`<div class="field"><label>الرقم الوظيفي</label><input id="editTeacherCode" value="${safeText(t.employee_code||'')}"></div><div class="field"><label>التخصص</label><input id="editTeacherSpecialization" value="${safeText(t.specialization||'')}"></div>`:''}<label style="display:flex;gap:8px;align-items:center;margin:10px 0"><input id="editProfileActive" type="checkbox" ${profile?.is_active!==false?'checked':''}> الحساب فعال</label><button class="btn btn-primary" type="submit">حفظ التعديلات</button></form>`));
+  $('#profileEditForm')?.addEventListener('submit',saveProfileEdit);
+}
+async function saveProfileEdit(e){e.preventDefault();try{const pid=$('#editProfileId').value,tid=$('#editTeacherId').value;const {error}=await supabaseClient.from('profiles').update({full_name:$('#editProfileName').value.trim(),username:normalizeUsername($('#editProfileUsername').value),phone:$('#editProfilePhone').value.trim()||null,is_active:$('#editProfileActive').checked}).eq('id',pid);if(error)throw error;if(tid){const {error:te}=await supabaseClient.from('teachers').update({employee_code:$('#editTeacherCode').value.trim()||null,specialization:$('#editTeacherSpecialization').value.trim()||null}).eq('id',tid);if(te)throw te;}await loadSchoolData();$('.modal-backdrop')?.remove();render();}catch(err){alert('تعذر حفظ الملف: '+(err?.message||'خطأ غير معروف'));}}
+
+function openTeacherProfileModal(teacherId){ const t=state.teachers.find(x=>String(x.id)===String(teacherId)); if(!t)return; openProfileEditModal(t.user_id,t.id); }
 
 function openUserAccountModal(role = 'teacher') {
   if (!isAdmin()) return;
@@ -755,7 +736,7 @@ function openUserAccountModal(role = 'teacher') {
           </div>
 
           <div class="field">
-            <label>اسم المستخدم</label>
+            <label>اسم المستخدم</label><button type="button" class="btn btn-soft btn-sm" id="generateUsername">توليد تلقائي</button>
             <input
               id="newUsername"
               type="text"
@@ -772,7 +753,7 @@ function openUserAccountModal(role = 'teacher') {
           </div>
 
           <div class="field">
-            <label>كلمة المرور الأولية</label>
+            <label>كلمة المرور الأولية</label><button type="button" class="btn btn-soft btn-sm" id="generatePassword">توليد كلمة مرور</button>
             <input
               id="newUserPassword"
               type="password"
@@ -824,10 +805,9 @@ function openUserAccountModal(role = 'teacher') {
     )
   );
 
-  $('#userAccountForm')?.addEventListener(
-    'submit',
-    saveUserAccount
-  );
+  $('#userAccountForm')?.addEventListener('submit', saveUserAccount);
+  $('#generateUsername')?.addEventListener('click',()=>{$('#newUsername').value=randomUsername($('#newUserName')?.value||'user');});
+  $('#generatePassword')?.addEventListener('click',()=>{const p=randomPassword();$('#newUserPassword').type='text';$('#newUserPassword').value=p;});
 }
 
 async function saveUserAccount(event) {
@@ -1316,7 +1296,7 @@ function teachersView() {
               safeText(r.name),
               safeText(r.specialization || ''),
               subjectNames.length ? subjectNames.map(name => `<span class="badge badge-info">${safeText(name)}</span>`).join(' ') : '<span class="muted">لا توجد تكليفات</span>',
-              `<button class="btn btn-soft btn-sm" data-add-assignment="${r.id}">إضافة تكليف</button>`
+              `<button class="btn btn-soft btn-sm" data-edit-teacher="${r.id}">الملف</button> <button class="btn btn-soft btn-sm" data-add-assignment="${r.id}">إضافة تكليف</button> <button class="btn btn-soft btn-sm" data-manage-assignments="${r.id}">إدارة التكليفات</button>`
             ];
           }
         )}
@@ -1873,6 +1853,15 @@ async function saveAssignment(event) {
   }
 }
 
+function openManageAssignments(teacherId){
+ const t=teacherById(teacherId); const rows=state.assignments.filter(a=>String(a.teacher_id)===String(teacherId));
+ showModal(modal(`تكليفات ${safeText(t?.name||'المدرس')}`, rows.length?`<div class="assignment-list">${rows.map(a=>{const sec=sectionById(a.section_id),sub=subjectById(a.subject_id);return `<div class="assignment-manage-row"><span><strong>${safeText(sub?.name||'')}</strong> — ${safeText(sec?.grade||'')} / ${safeText(sec?.name||'')}</span><span><button class="btn btn-soft btn-sm" data-edit-assignment="${a.id}">تعديل</button> <button class="btn btn-soft btn-sm" data-delete-assignment="${a.id}">حذف</button></span></div>`}).join('')}</div>`:'<div class="empty">لا توجد تكليفات.</div>'));
+ $$('[data-edit-assignment]').forEach(b=>b.addEventListener('click',()=>openEditAssignmentModal(b.dataset.editAssignment)));
+ $$('[data-delete-assignment]').forEach(b=>b.addEventListener('click',()=>deleteAssignment(b.dataset.deleteAssignment)));
+}
+function openEditAssignmentModal(id){const a=state.assignments.find(x=>String(x.id)===String(id));if(!a)return;showModal(modal('تعديل التكليف',`<form id="editAssignmentForm"><div class="field"><label>المادة</label><select id="editAssignmentSubject">${state.subjects.map(x=>`<option value="${x.id}" ${String(x.id)===String(a.subject_id)?'selected':''}>${safeText(x.name)}</option>`).join('')}</select></div><div class="field"><label>الشعبة</label><select id="editAssignmentSection">${state.sections.map(x=>`<option value="${x.id}" ${String(x.id)===String(a.section_id)?'selected':''}>${safeText(x.grade)} / ${safeText(x.name)}</option>`).join('')}</select></div><div class="field"><label>بداية التكليف</label><input id="editAssignmentStart" type="date" value="${a.start_date||''}"></div><div class="field"><label>نهاية التكليف</label><input id="editAssignmentEnd" type="date" value="${a.end_date||''}"></div><div class="field"><label>الحالة</label><select id="editAssignmentStatus"><option value="active" ${a.status==='active'?'selected':''}>فعال</option><option value="inactive" ${a.status!=='active'?'selected':''}>غير فعال</option></select></div><button class="btn btn-primary" type="submit">حفظ</button></form>`));$('#editAssignmentForm').addEventListener('submit',async e=>{e.preventDefault();const {error}=await supabaseClient.from('teacher_assignments').update({subject_id:$('#editAssignmentSubject').value,section_id:$('#editAssignmentSection').value,start_date:$('#editAssignmentStart').value,end_date:$('#editAssignmentEnd').value||null,status:$('#editAssignmentStatus').value}).eq('id',id);if(error)return alert(error.message);await loadSchoolData();$('.modal-backdrop')?.remove();render();});}
+async function deleteAssignment(id){if(!confirm('حذف هذا التكليف؟ سيتم حذف حصص الجدول المرتبطة به إذا كانت قاعدة البيانات مضبوطة على الحذف المتسلسل.'))return;const {error}=await supabaseClient.from('teacher_assignments').delete().eq('id',id);if(error)return alert('تعذر حذف التكليف: '+error.message);await loadSchoolData();$('.modal-backdrop')?.remove();render();}
+
 /* =========================================================
    TIMETABLE CRUD
 ========================================================= */
@@ -1976,7 +1965,7 @@ function printTimetableReport(type, teacherId, sectionKey) {
   if(!rows.length)return alert('لا توجد حصص ضمن الاختيار.');
   const year=safeText(activeYear()?.name||'');
   const w=window.open('','_blank'); if(!w)return alert('تعذر فتح معاينة الطباعة. اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.');
-  w.document.write(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>${safeText(title)}</title><style>@page{size:A3 landscape;margin:7mm}*{box-sizing:border-box}body{font-family:Tahoma,Arial,sans-serif;color:#111;margin:0}.actions{text-align:center;margin:8px}.head{text-align:center;margin-bottom:8px}.head h1{font-size:20px;margin:0 0 4px}.meta{font-size:11px}.tt-scroll{overflow:visible}.tt-personal,.tt-school{width:100%;border-collapse:collapse;table-layout:fixed}.tt-personal th,.tt-personal td,.tt-school th,.tt-school td{border:1px solid #222;text-align:center;vertical-align:middle;padding:4px;font-size:9px}.tt-personal thead th,.tt-personal tbody th,.tt-school thead th,.tt-section-name{background:#eee;font-weight:700}.tt-personal td{height:58px}.tt-personal strong,.tt-school strong{display:block;font-size:9px}.tt-personal small,.tt-school small{display:block;font-size:7px;margin-top:2px}.tt-school{min-width:0}.tt-school td{height:38px;padding:2px}.tt-day-group{font-size:11px!important}.tt-section-name{width:95px}.tt-empty{color:#aaa}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}tr{break-inside:avoid}}</style></head><body><div class="actions"><button onclick="window.print()">🖨️ طباعة / حفظ PDF</button></div><div class="head"><h1>مسار لإدارة المدارس — ${safeText(title)}</h1><div class="meta">العام الدراسي: ${year} • إصدار مسار ${MASAR_VERSION}</div></div>${content}</body></html>`); w.document.close();
+  w.document.write(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>${safeText(title)}</title><style>@page{size:A3 landscape;margin:7mm}*{box-sizing:border-box}body{font-family:Tahoma,Arial,sans-serif;color:#111;margin:0}.actions{text-align:center;margin:8px}.head{text-align:center;margin-bottom:8px}.head h1{font-size:20px;margin:0 0 4px}.meta{font-size:11px}.tt-scroll{overflow:visible}.tt-personal,.tt-school{width:100%;border-collapse:collapse;table-layout:fixed}.tt-personal th,.tt-personal td,.tt-school th,.tt-school td{border:1px solid #222;text-align:center;vertical-align:middle;padding:4px;font-size:9px}.tt-personal thead th,.tt-personal tbody th,.tt-school thead th,.tt-section-name{background:#eee;font-weight:700}.tt-personal td{height:58px}.tt-entry{height:100%;padding:4px;border-radius:5px;background:hsl(var(--tt-h) 70% 91%)!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.tt-personal strong,.tt-school strong{display:block;font-size:9px}.tt-personal small,.tt-school small{display:block;font-size:7px;margin-top:2px}.tt-school{min-width:0}.tt-school td{height:38px;padding:2px}.tt-day-group{font-size:11px!important}.tt-section-name{width:95px}.tt-empty{color:#aaa}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}tr{break-inside:avoid}}</style></head><body><div class="actions"><button onclick="window.print()">🖨️ طباعة / حفظ PDF</button></div><div class="head"><h1>مسار لإدارة المدارس — ${safeText(title)}</h1><div class="meta">العام الدراسي: ${year} • إصدار مسار ${MASAR_VERSION}</div></div>${content}</body></html>`); w.document.close();
 }
 
 async function loadTimetablePreferences(retry = true) {
@@ -3272,6 +3261,10 @@ function bind() {
   $$('[data-add-assignment]').forEach(button =>
     button.addEventListener('click', () => openAssignmentModal(button.dataset.addAssignment))
   );
+
+  $$('[data-edit-teacher]').forEach(button => button.addEventListener('click',()=>openTeacherProfileModal(button.dataset.editTeacher)));
+  $$('[data-edit-profile]').forEach(button => button.addEventListener('click',()=>openProfileEditModal(button.dataset.editProfile)));
+  $$('[data-manage-assignments]').forEach(button => button.addEventListener('click',()=>openManageAssignments(button.dataset.manageAssignments)));
 
   $$('[data-delete-timetable]').forEach(button =>
     button.addEventListener('click', () => deleteTimetable(button.dataset.deleteTimetable))
