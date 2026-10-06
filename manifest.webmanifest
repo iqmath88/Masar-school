@@ -1,0 +1,32 @@
+{
+  "name": "مسار التعليم — منصة المعلم",
+  "short_name": "مسار التعليم",
+  "description": "مسار التعليم v2.3.0 — تصميم المحاضرات وإدارة الطلبة والاختبارات",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "fullscreen"
+  ],
+  "orientation": "any",
+  "background_color": "#ECFDF8",
+  "theme_color": "#075985",
+  "dir": "rtl",
+  "lang": "ar",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "version": "2.3.0",
+  "id": "masar-education-v1"
+}
