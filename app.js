@@ -1,7 +1,7 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
-const MASAR_VERSION = '1.5.0';
+const MASAR_VERSION = '1.6.0';
 const MASAR_DB_TARGET = 3;
 
 const DAYS = {
@@ -29,6 +29,7 @@ const state = {
   timetable: [],
   teacherAvailability: [],
   timetableRules: [],
+  timetableSettings: {1:7,2:7,3:7,4:7,5:7},
   exams: [],
   systemHealth: { dbVersion: null, status: 'unknown', message: '' }
 };
@@ -1876,29 +1877,50 @@ let timetableDisplayMode = 'school';
 let timetableDisplayTeacher = '';
 let timetableDisplaySection = '';
 
+function shortTeacherName(name) {
+  return String(name || '').trim().split(/\s+/).slice(0,2).join(' ');
+}
+function subjectHue(subject) {
+  let h=0; for (const ch of String(subject||'')) h=(h*31+ch.charCodeAt(0))%360;
+  return h;
+}
+function timetableDayPeriods(day){ return Number(state.timetableSettings?.[day] ?? 7); }
+function timetableMaxPeriods(){ return Math.max(1,...[1,2,3,4,5].map(timetableDayPeriods)); }
+function ttCellStyle(subject){ const h=subjectHue(subject); return `--tt-h:${h}`; }
 function timetableCellContent(row, mode) {
   if (!row) return '<span class="tt-empty">—</span>';
-  if (mode === 'teacher') return `<strong>${safeText(row.grade)} / ${safeText(row.section)}</strong><small>${safeText(row.subject)}</small>`;
-  if (mode === 'section') return `<strong>${safeText(row.subject)}</strong><small>${safeText(row.teacher)}</small>`;
-  return `<strong>${safeText(row.subject)}</strong><small>${safeText(row.teacher)}</small>`;
+  if (mode === 'teacher') return `<div class="tt-entry" style="${ttCellStyle(row.subject)}"><strong>${safeText(row.grade)} / ${safeText(row.section)}</strong><small>${safeText(row.subject)}</small></div>`;
+  if (mode === 'section') return `<div class="tt-entry" style="${ttCellStyle(row.subject)}"><strong>${safeText(row.subject)}</strong><small>${safeText(shortTeacherName(row.teacher))}</small></div>`;
+  return `<div class="tt-entry" style="${ttCellStyle(row.subject)}"><strong>${safeText(row.subject)}</strong><small>${safeText(shortTeacherName(row.teacher))}</small></div>`;
 }
-
 function personalTimetableGrid(rows, mode) {
-  const days=[1,2,3,4,5];
-  return `<div class="tt-scroll"><table class="tt-personal"><thead><tr><th class="tt-corner">اليوم / الحصة</th>${Array.from({length:7},(_,i)=>`<th>الحصة ${i+1}</th>`).join('')}</tr></thead><tbody>${days.map(d=>`<tr><th>${DAYS[d]}</th>${Array.from({length:7},(_,i)=>{const r=rows.find(x=>Number(x.dayOfWeek)===d&&Number(x.period)===i+1);return `<td>${timetableCellContent(r,mode)}</td>`}).join('')}</tr>`).join('')}</tbody></table></div>`;
+  const days=[1,2,3,4,5], max=timetableMaxPeriods();
+  return `<div class="tt-scroll"><table class="tt-personal"><thead><tr><th class="tt-corner">اليوم / الحصة</th>${Array.from({length:max},(_,i)=>`<th>الحصة ${i+1}</th>`).join('')}</tr></thead><tbody>${days.map(d=>`<tr><th>${DAYS[d]}</th>${Array.from({length:max},(_,i)=>{const p=i+1;if(p>timetableDayPeriods(d))return '<td class="tt-closed">—</td>';const r=rows.find(x=>Number(x.dayOfWeek)===d&&Number(x.period)===p);return `<td>${timetableCellContent(r,mode)}</td>`}).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
-
 function schoolTimetableGrid() {
   const days=[1,2,3,4,5];
-  const sections=[...new Map(state.timetable.map(r=>[`${r.grade}|||${r.section}`,{grade:r.grade,section:r.section}])).values()]
-    .sort((a,b)=>(a.grade+' '+a.section).localeCompare(b.grade+' '+b.section,'ar'));
-  if(!sections.length) return '<div class="notice">لا توجد بيانات جدول بعد.</div>';
-  const head1=days.map(d=>`<th colspan="7" class="tt-day-group">${DAYS[d]}</th>`).join('');
-  const head2=days.map(()=>Array.from({length:7},(_,i)=>`<th>${i+1}</th>`).join('')).join('');
-  const body=sections.map(sec=>`<tr><th class="tt-section-name">${safeText(sec.grade)} / ${safeText(sec.section)}</th>${days.map(d=>Array.from({length:7},(_,i)=>{const r=state.timetable.find(x=>x.grade===sec.grade&&x.section===sec.section&&Number(x.dayOfWeek)===d&&Number(x.period)===i+1);return `<td>${r?`<strong>${safeText(r.subject)}</strong><small>${safeText(r.teacher)}</small>`:'<span class="tt-empty">—</span>'}</td>`}).join('')).join('')}</tr>`).join('');
+  const sections=[...new Map(state.sections.map(sec=>[String(sec.id),{id:sec.id,grade:(state.grades.find(g=>String(g.id)===String(sec.grade_id))?.name||''),section:sec.name}])).values()].sort((a,b)=>(a.grade+' '+a.section).localeCompare(b.grade+' '+b.section,'ar'));
+  if(!sections.length) return '<div class="notice">لا توجد شعب مسجلة.</div>';
+  const head1=days.map(d=>`<th colspan="${timetableDayPeriods(d)}" class="tt-day-group">${DAYS[d]}</th>`).join('');
+  const head2=days.map(d=>Array.from({length:timetableDayPeriods(d)},(_,i)=>`<th>${i+1}</th>`).join('')).join('');
+  const body=sections.map(sec=>`<tr><th class="tt-section-name">${safeText(sec.grade)} / ${safeText(sec.section)}</th>${days.map(d=>Array.from({length:timetableDayPeriods(d)},(_,i)=>{const r=state.timetable.find(x=>x.grade===sec.grade&&x.section===sec.section&&Number(x.dayOfWeek)===d&&Number(x.period)===i+1);return `<td>${timetableCellContent(r,'school')}</td>`}).join('')).join('')}</tr>`).join('');
   return `<div class="tt-scroll tt-school-wrap"><table class="tt-school"><thead><tr><th rowspan="2" class="tt-section-name">الصف / الشعبة</th>${head1}</tr><tr>${head2}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
-
+function timetableDiagnostics(rows=state.timetable){
+  const errors=[], warnings=[];
+  const teacherSlot=new Map(), sectionSlot=new Map(), subjDay=new Map();
+  for(const r of rows){
+    const tk=`${r.teacherId}|${r.dayOfWeek}|${r.period}`, sk=`${r.grade}|${r.section}|${r.dayOfWeek}|${r.period}`;
+    if(teacherSlot.has(tk)) errors.push(`المدرس ${shortTeacherName(r.teacher)} لديه أكثر من حصة في ${DAYS[r.dayOfWeek]} / الحصة ${r.period}`); else teacherSlot.set(tk,r);
+    if(sectionSlot.has(sk)) errors.push(`${r.grade} / ${r.section} لديها أكثر من حصة في ${DAYS[r.dayOfWeek]} / الحصة ${r.period}`); else sectionSlot.set(sk,r);
+    if(Number(r.period)>timetableDayPeriods(Number(r.dayOfWeek))) errors.push(`حصة خارج عدد حصص ${DAYS[r.dayOfWeek]}: ${r.grade}/${r.section} الحصة ${r.period}`);
+    const k=`${r.grade}|${r.section}|${r.subject}|${r.dayOfWeek}`; subjDay.set(k,(subjDay.get(k)||0)+1);
+  }
+  for(const [k,n] of subjDay) if(n>1){const [g,sec,sub,d]=k.split('|');warnings.push(`تكررت ${sub} في ${g}/${sec} يوم ${DAYS[+d]} (${n} حصص)`)}
+  return {errors:[...new Set(errors)],warnings:[...new Set(warnings)]};
+}
+function timetableHealthHtml(){const d=timetableDiagnostics();const cls=d.errors.length?'tt-health-danger':d.warnings.length?'tt-health-warning':'tt-health-ok';const text=d.errors.length?`✕ ${d.errors.length} تضارب حرج`:d.warnings.length?`⚠ ${d.warnings.length} تحذير`:'✓ لا توجد تعارضات';return `<button class="tt-health ${cls}" data-action="show-timetable-issues">${text}</button>`;}
+function showTimetableIssues(){const d=timetableDiagnostics();showModal(modal('فحص تعارضات الجدول',`${d.errors.length?`<div class="issue-block danger"><strong>تعارضات حرجة — يجب حلها</strong>${d.errors.map(x=>`<div>• ${safeText(x)}</div>`).join('')}</div>`:'<div class="issue-block ok">✓ لا توجد تعارضات حرجة.</div>'}${d.warnings.length?`<div class="issue-block warning"><strong>تحذيرات</strong>${d.warnings.map(x=>`<div>• ${safeText(x)}</div>`).join('')}</div>`:''}`));}
 function timetableView() {
   if (!isAdmin()) return denied();
   const teacherOptions=[...new Map(state.timetable.map(r=>[String(r.teacherId),r.teacher])).entries()].sort((a,b)=>a[1].localeCompare(b[1],'ar')).map(([id,n])=>`<option value="${id}" ${String(timetableDisplayTeacher)===id?'selected':''}>${safeText(n)}</option>`).join('');
@@ -1914,9 +1936,9 @@ function timetableView() {
 
   return `
     <div class="page-title"><h1>جدول الحصص الذكي</h1><div class="toolbar">
-      <button class="btn btn-primary" data-action="generate-timetable">⚡ إنشاء تلقائي</button><button class="btn btn-soft" data-action="teacher-availability">⚙ تخصيص المدرسين</button><button class="btn btn-soft" data-action="add-timetable">+ إضافة حصة يدوياً</button><button class="btn btn-soft" data-action="print-timetable">🖨️ طباعة وتصدير</button>
+      <button class="btn btn-primary" data-action="generate-timetable">⚡ إنشاء تلقائي</button><button class="btn btn-soft" data-action="timetable-settings">🗓 إعداد أيام الدوام</button><button class="btn btn-soft" data-action="teacher-availability">⚙ تخصيص المدرسين</button><button class="btn btn-soft" data-action="add-timetable">+ إضافة حصة يدوياً</button><button class="btn btn-soft" data-action="print-timetable">🖨️ طباعة وتصدير</button>
     </div></div>
-    <div class="notice">ينشئ مسار الجدول آلياً مع منع تعارض المدرس والشعبة واحترام تخصيصات المدرسين. اختر طريقة العرض أدناه.</div>
+    <div class="notice">ينشئ مسار الجدول آلياً مع منع تعارض المدرس والشعبة واحترام تخصيصات المدرسين وعدد حصص كل يوم.</div>${timetableHealthHtml()}
     <div class="card tt-view-card">
       <div class="tt-tabs"><button class="btn ${timetableDisplayMode==='school'?'btn-primary':'btn-soft'}" data-tt-view="school">الجدول العام للمدرسة</button><button class="btn ${timetableDisplayMode==='teacher'?'btn-primary':'btn-soft'}" data-tt-view="teacher">جدول المدرس</button><button class="btn ${timetableDisplayMode==='section'?'btn-primary':'btn-soft'}" data-tt-view="section">جدول الشعبة</button></div>
       ${timetableDisplayMode==='teacher'?`<div class="tt-picker"><label>المدرس</label><select id="ttTeacherSelect"><option value="">اختر المدرس</option>${teacherOptions}</select></div>`:''}
@@ -1960,11 +1982,12 @@ async function loadTimetablePreferences(retry = true) {
   const dbVersion = Number(meta.data?.db_version || 0);
   if (dbVersion < 3) throw Object.assign(new Error('قاعدة البيانات تحتاج تحديث Smart Timetable (الإصدار 3).'), { code: 'MASAR_DB_OLD' });
 
-  const [a, r] = await Promise.all([
+  const [a, r, st] = await Promise.all([
     supabaseClient.from('teacher_availability').select('teacher_id, day_of_week, period_number, preference'),
-    supabaseClient.from('assignment_timetable_rules').select('assignment_id, weekly_periods')
+    supabaseClient.from('assignment_timetable_rules').select('assignment_id, weekly_periods'),
+    supabaseClient.from('school_timetable_settings').select('day_of_week, periods_count').order('day_of_week')
   ]);
-  const err = a.error || r.error;
+  const err = a.error || r.error || st.error;
   if (err) {
     // PostgREST can briefly retain an old schema cache immediately after a migration.
     if (retry && ['PGRST205','42P01'].includes(String(err.code || ''))) {
@@ -1975,6 +1998,7 @@ async function loadTimetablePreferences(retry = true) {
   }
   state.teacherAvailability = a.data || [];
   state.timetableRules = r.data || [];
+  state.timetableSettings = Object.fromEntries((st.data || []).map(x=>[Number(x.day_of_week),Number(x.periods_count)]));
 }
 
 function timetableSetupError(error) {
@@ -2044,6 +2068,11 @@ async function openTeacherAvailabilityModal() {
 }
 function prefLabel(p){ return ({available:'متاح',preferred:'مفضّل',avoid:'غير مفضّل',blocked:'ممنوع'})[p]||p; }
 
+async function openTimetableSettingsModal(){
+  try{await loadTimetablePreferences();}catch(e){alert(timetableSetupError(e));return;}
+  showModal(modal('إعداد أيام الدوام وعدد الحصص',`<div class="notice">حدد عدد الحصص الفعلي لكل يوم. القيمة 0 تعني أن اليوم ليس يوم دوام.</div><div class="day-period-settings">${[1,2,3,4,5].map(d=>`<div><strong>${DAYS[d]}</strong><input type="number" min="0" max="12" value="${timetableDayPeriods(d)}" data-day-periods="${d}"></div>`).join('')}</div><button class="btn btn-primary" id="saveDayPeriods">حفظ الإعدادات</button>`));
+  $('#saveDayPeriods').addEventListener('click',async()=>{const rows=$$('[data-day-periods]').map(i=>({day_of_week:+i.dataset.dayPeriods,periods_count:Math.max(0,Math.min(12,+i.value||0))}));const {error}=await supabaseClient.from('school_timetable_settings').upsert(rows,{onConflict:'day_of_week'});if(error)return alert(error.message);state.timetableSettings=Object.fromEntries(rows.map(x=>[x.day_of_week,x.periods_count]));$('.modal-backdrop')?.remove();render();});
+}
 async function openGenerateTimetableModal(){
   try { await loadTimetablePreferences(); } catch(e){ alert(timetableSetupError(e)); return; }
   const active=state.assignments.filter(a=>a.status==='active' && (!activeYear() || String(a.academic_year_id)===String(activeYear().id)));
@@ -2052,7 +2081,7 @@ async function openGenerateTimetableModal(){
   showModal(modal('إنشاء الجدول تلقائياً',`
     <div class="notice">حدد عدد الحصص الأسبوعية لكل تكليف. الحصص المقفلة 🔒 ستبقى في مكانها عند إعادة التوليد.</div>
     <div class="smart-rule-list">${active.map(a=>{const t=teacherById(a.teacher_id),s=subjectById(a.subject_id),sec=sectionById(a.section_id);return `<div class="smart-rule-row"><span>${safeText(t?.name||'')} — ${safeText(s?.name||'')} — ${safeText(sec?.grade||'')}/${safeText(sec?.name||'')}</span><input type="number" min="1" max="10" value="${ruleMap.get(String(a.id))||1}" data-weekly="${a.id}"></div>`}).join('')}</div>
-    <div class="form-grid"><div class="field"><label>أيام الدوام</label><input id="genDays" type="number" min="1" max="6" value="5"></div><div class="field"><label>عدد الحصص يومياً</label><input id="genPeriods" type="number" min="1" max="12" value="7"></div></div>
+    <div class="notice">أيام الدوام الحالية: ${[1,2,3,4,5].filter(d=>timetableDayPeriods(d)>0).map(d=>`${DAYS[d]} ${timetableDayPeriods(d)} حصص`).join(' • ')}</div>
     <button id="runGenerator" class="btn btn-primary">⚡ إنشاء الجدول</button><div id="generatorMessage" class="notice" style="display:none;margin-top:12px"></div>
   `));
   $('#runGenerator').addEventListener('click',runSmartGenerator);
@@ -2064,7 +2093,7 @@ async function runSmartGenerator(){
     const weekly=new Map($$('[data-weekly]').map(i=>[String(i.dataset.weekly),Math.max(1,+i.value||1)]));
     const rules=[...weekly].map(([assignment_id,weekly_periods])=>({assignment_id,weekly_periods}));
     const up=await supabaseClient.from('assignment_timetable_rules').upsert(rules,{onConflict:'assignment_id'}); if(up.error) throw up.error;
-    const days=Math.max(1,Math.min(6,+$('#genDays').value||5)), periods=Math.max(1,Math.min(12,+$('#genPeriods').value||7));
+    const activeDays=[1,2,3,4,5].filter(d=>timetableDayPeriods(d)>0); if(!activeDays.length) throw new Error('لا توجد أيام دوام مفعلة.');
     const locked=state.timetable.filter(x=>x.isLocked);
     const teacherBusy=new Set(locked.map(x=>`${x.teacherId}-${x.dayOfWeek}-${x.period}`));
     const sectionBusy=new Set(locked.map(x=>{const a=state.assignments.find(y=>String(y.id)===String(x.assignmentId));return `${a?.section_id}-${x.dayOfWeek}-${x.period}`}));
@@ -2075,10 +2104,14 @@ async function runSmartGenerator(){
       const need=Math.max(0,(weekly.get(String(a.id))||1)-already);
       for(let i=0;i<need;i++) tasks.push(a);
     }
-    const slotsFor=a=>{const arr=[];for(let d=1;d<=days;d++)for(let p=1;p<=periods;p++){const pref=prefMap.get(`${a.teacher_id}-${d}-${p}`)||'available';if(pref==='blocked')continue;arr.push({d,p,pref,score:pref==='preferred'?0:pref==='available'?10:30});}return arr.sort((x,y)=>x.score-y.score)};
+    const assignmentDayCount=new Map();
+    for(const x of locked){const k=`${x.assignmentId}-${x.dayOfWeek}`;assignmentDayCount.set(k,(assignmentDayCount.get(k)||0)+1);}
+    const teacherDayLoad=new Map(); for(const x of locked){const k=`${x.teacherId}-${x.dayOfWeek}`;teacherDayLoad.set(k,(teacherDayLoad.get(k)||0)+1);}
+    const teacherAvailableDays=a=>activeDays.filter(d=>Array.from({length:timetableDayPeriods(d)},(_,i)=>i+1).some(p=>(prefMap.get(`${a.teacher_id}-${d}-${p}`)||'available')!=='blocked'));
+    const slotsFor=a=>{const arr=[];const weeklyNeed=weekly.get(String(a.id))||1;const availDays=teacherAvailableDays(a);const repeatRequired=weeklyNeed>availDays.length;for(const d of activeDays)for(let p=1;p<=timetableDayPeriods(d);p++){const pref=prefMap.get(`${a.teacher_id}-${d}-${p}`)||'available';if(pref==='blocked')continue;const sameDay=assignmentDayCount.get(`${a.id}-${d}`)||0;if(sameDay>0&&!repeatRequired)continue;let score=pref==='preferred'?0:pref==='available'?10:30;score+=(teacherDayLoad.get(`${a.teacher_id}-${d}`)||0)*8;score+=sameDay*60;arr.push({d,p,pref,score});}return arr.sort((x,y)=>x.score-y.score||x.d-y.d||x.p-y.p)};
     tasks.sort((a,b)=>slotsFor(a).length-slotsFor(b).length);
     const result=[];
-    function place(i){if(i===tasks.length)return true;const a=tasks[i];for(const sl of slotsFor(a)){const tk=`${a.teacher_id}-${sl.d}-${sl.p}`,sk=`${a.section_id}-${sl.d}-${sl.p}`;if(teacherBusy.has(tk)||sectionBusy.has(sk))continue;teacherBusy.add(tk);sectionBusy.add(sk);result.push({assignment_id:a.id,day_of_week:sl.d,period_number:sl.p,room:null,is_active:true,is_locked:false});if(place(i+1))return true;result.pop();teacherBusy.delete(tk);sectionBusy.delete(sk);}return false;}
+    function place(i){if(i===tasks.length)return true;const a=tasks[i];for(const sl of slotsFor(a)){const tk=`${a.teacher_id}-${sl.d}-${sl.p}`,sk=`${a.section_id}-${sl.d}-${sl.p}`;if(teacherBusy.has(tk)||sectionBusy.has(sk))continue;teacherBusy.add(tk);sectionBusy.add(sk);const ad=`${a.id}-${sl.d}`,td=`${a.teacher_id}-${sl.d}`;assignmentDayCount.set(ad,(assignmentDayCount.get(ad)||0)+1);teacherDayLoad.set(td,(teacherDayLoad.get(td)||0)+1);result.push({assignment_id:a.id,day_of_week:sl.d,period_number:sl.p,room:null,is_active:true,is_locked:false});if(place(i+1))return true;result.pop();assignmentDayCount.set(ad,assignmentDayCount.get(ad)-1);teacherDayLoad.set(td,teacherDayLoad.get(td)-1);teacherBusy.delete(tk);sectionBusy.delete(sk);}return false;}
     if(!place(0)) throw new Error('تعذر إيجاد جدول يحقق القيود الحالية. خفف الأوقات الممنوعة أو زد أيام/حصص الدوام.');
     const unlockedIds=state.timetable.filter(x=>!x.isLocked).map(x=>x.id); if(unlockedIds.length){const del=await supabaseClient.from('timetable').delete().in('id',unlockedIds);if(del.error)throw del.error;}
     if(result.length){const ins=await supabaseClient.from('timetable').insert(result);if(ins.error)throw ins.error;}
@@ -2096,7 +2129,7 @@ function openTimetableModal() {
   showModal(modal('إضافة حصة',`<form id="timetableForm"><div class="field"><label>التكليف</label><select id="timetableAssignment" required><option value="">اختر التكليف</option>${state.assignments.map(a=>{const t=teacherById(a.teacher_id),s=subjectById(a.subject_id),sec=sectionById(a.section_id);return `<option value="${a.id}">${safeText(t?.name||'مدرس')} — ${safeText(s?.name||'')} — ${safeText(sec?.grade||'')}/${safeText(sec?.name||'')}</option>`}).join('')}</select></div><div class="field"><label>اليوم</label><select id="timetableDay" required>${Object.entries(DAYS).map(([id,name])=>`<option value="${id}">${name}</option>`).join('')}</select></div><div class="field"><label>رقم الحصة</label><input id="timetablePeriod" type="number" min="1" max="12" required></div><div class="field"><label>القاعة</label><input id="timetableRoom"></div><button id="saveTimetableButton" class="btn btn-primary" type="submit">إضافة الحصة</button><div id="timetableFormMessage" class="notice" style="display:none;margin-top:12px"></div></form>`));
   $('#timetableForm')?.addEventListener('submit', saveTimetable);
 }
-async function saveTimetable(event){event.preventDefault();const message=$('#timetableFormMessage'),button=$('#saveTimetableButton');const payload={assignment_id:$('#timetableAssignment')?.value,day_of_week:Number($('#timetableDay')?.value),period_number:Number($('#timetablePeriod')?.value),room:$('#timetableRoom')?.value.trim()||null,is_active:true,is_locked:false};if(!payload.assignment_id||!payload.day_of_week||!payload.period_number)return;try{button.disabled=true;button.textContent='جارٍ الحفظ...';const {error}=await supabaseClient.from('timetable').insert(payload);if(error)throw error;await loadSchoolData();$('.modal-backdrop')?.remove();render();}catch(error){message.style.display='block';message.textContent='تعذر حفظ الحصة: '+(error?.message||'خطأ غير معروف');button.disabled=false;button.textContent='إضافة الحصة';}}
+async function saveTimetable(event){event.preventDefault();const message=$('#timetableFormMessage'),button=$('#saveTimetableButton');const assignmentId=$('#timetableAssignment')?.value,day=Number($('#timetableDay')?.value),period=Number($('#timetablePeriod')?.value);const a=state.assignments.find(x=>String(x.id)===String(assignmentId));if(!a||!day||!period)return;if(period>timetableDayPeriods(day)){message.style.display='block';message.textContent=`تعارض: ${DAYS[day]} يحتوي ${timetableDayPeriods(day)} حصص فقط.`;return;}const tc=state.timetable.find(x=>String(x.teacherId)===String(a.teacher_id)&&Number(x.dayOfWeek)===day&&Number(x.period)===period);const sec=sectionById(a.section_id);const sc=state.timetable.find(x=>x.grade===(state.grades.find(g=>String(g.id)===String(sec?.grade_id))?.name||'')&&x.section===sec?.name&&Number(x.dayOfWeek)===day&&Number(x.period)===period);if(tc||sc){message.style.display='block';message.textContent=tc?`تعارض: المدرس لديه حصة أخرى في ${DAYS[day]} / الحصة ${period}.`:`تعارض: الشعبة لديها حصة أخرى في ${DAYS[day]} / الحصة ${period}.`;return;}const payload={assignment_id:assignmentId,day_of_week:day,period_number:period,room:$('#timetableRoom')?.value.trim()||null,is_active:true,is_locked:false};try{button.disabled=true;button.textContent='جارٍ الحفظ...';const {error}=await supabaseClient.from('timetable').insert(payload);if(error)throw error;await loadSchoolData();$('.modal-backdrop')?.remove();render();}catch(error){message.style.display='block';message.textContent='تعذر حفظ الحصة: '+(error?.message||'خطأ غير معروف');button.disabled=false;button.textContent='إضافة الحصة';}}
 async function deleteTimetable(id){if(!confirm('هل تريد حذف هذه الحصة؟'))return;try{const {error}=await supabaseClient.from('timetable').delete().eq('id',id);if(error)throw error;await loadSchoolData();render();}catch(error){alert('تعذر حذف الحصة: '+(error?.message||'خطأ غير معروف'));}}
 
 /* =========================================================
@@ -3173,6 +3206,8 @@ function bind() {
   $('[data-action="add-subject"]')?.addEventListener('click', () => openSubjectModal());
   $('[data-action="add-timetable"]')?.addEventListener('click', openTimetableModal);
   $('[data-action="generate-timetable"]')?.addEventListener('click', openGenerateTimetableModal);
+  $('[data-action="timetable-settings"]')?.addEventListener('click', openTimetableSettingsModal);
+  $('[data-action="show-timetable-issues"]')?.addEventListener('click', showTimetableIssues);
   $('[data-action="teacher-availability"]')?.addEventListener('click', openTeacherAvailabilityModal);
   $('[data-action="print-timetable"]')?.addEventListener('click', openTimetablePrintModal);
   $$('[data-tt-view]').forEach(b=>b.addEventListener('click',()=>{timetableDisplayMode=b.dataset.ttView;render();}));
