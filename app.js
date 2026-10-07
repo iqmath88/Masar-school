@@ -299,7 +299,7 @@ async function loadSchoolData() {
 
     supabaseClient
       .from('teachers')
-      .select('id, user_id, full_name, employee_code, specialization, phone'),
+      .select('id, user_id, full_name, employee_code, specialization, phone, notes'),
 
     supabaseClient
       .from('teacher_assignments')
@@ -363,7 +363,8 @@ async function loadSchoolData() {
 
   state.sections = state.sections.map(s => ({
     ...s,
-    grade: gradeMap.get(s.grade_id)?.name || ''
+    grade: gradeMap.get(s.grade_id)?.name || '',
+    gradeLevel: Number(gradeMap.get(s.grade_id)?.level || 999)
   }));
 
   const profileNames = new Map();
@@ -723,17 +724,26 @@ function generatedTeacherUsername(spec=''){ return `${specializationPrefix(spec)
 function downloadTextFile(filename, content, type='text/plain;charset=utf-8'){
   const blob=new Blob(['\ufeff'+content],{type}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),500);
 }
+function teacherAccountDetails(t){
+  const p=(state.profiles||[]).find(x=>String(x.id)===String(t.user_id));
+  const c=teacherCredential(t);
+  const assignments=(state.assignments||[]).filter(a=>String(a.teacher_id)===String(t.id)&&a.status!=='inactive');
+  const subjects=[...new Set(assignments.map(a=>(state.subjects||[]).find(s=>String(s.id)===String(a.subject_id))?.name).filter(Boolean))];
+  const sections=[...new Set(assignments.map(a=>{const sec=(state.sections||[]).find(s=>String(s.id)===String(a.section_id));return sec?`${sec.grade} / ${sec.name}`:''}).filter(Boolean))];
+  const weekly=assignments.reduce((sum,a)=>sum+Number((state.timetableRules||[]).find(r=>String(r.assignment_id)===String(a.id))?.weekly_periods||0),0);
+  return {p,c,subjects,sections,weekly};
+}
 function downloadTeacherCredential(teacherId){
-  const t=teacherById(teacherId); if(!t)return; const p=(state.profiles||[]).find(x=>String(x.id)===String(t.user_id)); const c=teacherCredential(t);
-  if(!c) return alert('لا توجد نسخة محفوظة من الرمز المؤقت لهذا الحساب على هذا الجهاز. أعد تعيين الرمز ثم نزّل البطاقة الجديدة.');
-  const txt=`مسار لإدارة المدارس\nسجل بيانات دخول المدرس\n\nاسم المدرس: ${t.name}\nالتخصص: ${t.specialization||''}\nاسم المستخدم: ${p?.username||c.username||''}\nالرمز المؤقت: ${c.password||''}\n\nتنبيه: الرمز مؤقت ويجب تغييره بعد أول دخول.`;
-  downloadTextFile(`teacher-${(p?.username||c.username||'account')}.txt`,txt);
+  const t=teacherById(teacherId); if(!t)return; const {p,c,subjects,sections,weekly}=teacherAccountDetails(t);
+  const password=c?.password||'غير متاح - أعد تعيين الرمز';
+  const txt=`مسار لإدارة المدارس\nسجل حساب المدرس\n\nاسم المدرس: ${t.name}\nالتخصص: ${t.specialization||''}\nالرقم الوظيفي: ${t.employee_code||''}\nالهاتف: ${t.phone||p?.phone||''}\nاسم المستخدم: ${p?.username||c?.username||''}\nالرمز المؤقت: ${password}\nحالة الحساب: ${t.user_id?(p?.is_active!==false?'فعال':'موقوف'):'بدون حساب'}\nتاريخ إنشاء الحساب: ${p?.created_at?new Date(p.created_at).toLocaleDateString('ar-IQ'):''}\nالمواد المكلف بها: ${subjects.join('، ')}\nالصفوف والشعب: ${sections.join('، ')}\nمجموع الحصص الأسبوعية: ${weekly}\nملاحظات إدارية: ${t.notes||''}\n\nتنبيه: الرمز المؤقت يظهر فقط إذا كان متاحاً في جلسة الإدارة الحالية.`;
+  downloadTextFile(`teacher-${(p?.username||c?.username||'account')}.txt`,txt);
 }
 function exportTeacherCredentials(){
-  const rows=[['اسم المدرس','التخصص','اسم المستخدم','الرمز المؤقت']];
-  state.teachers.forEach(t=>{const p=(state.profiles||[]).find(x=>String(x.id)===String(t.user_id));const c=teacherCredential(t);rows.push([t.name,t.specialization||'',p?.username||c?.username||'',c?.password||'غير متاح - أعد التعيين']);});
+  const rows=[['ت','اسم المدرس الكامل','التخصص','الرقم الوظيفي','الهاتف','اسم المستخدم','الرمز المؤقت','حالة الحساب','تاريخ إنشاء الحساب','المواد المكلف بها','الصفوف والشعب','مجموع الحصص الأسبوعية','ملاحظات إدارية']];
+  state.teachers.forEach((t,i)=>{const {p,c,subjects,sections,weekly}=teacherAccountDetails(t);rows.push([i+1,t.name,t.specialization||'',t.employee_code||'',t.phone||p?.phone||'',p?.username||c?.username||'',c?.password||'غير متاح - أعد التعيين',t.user_id?(p?.is_active!==false?'فعال':'موقوف'):'بدون حساب',p?.created_at?new Date(p.created_at).toLocaleDateString('ar-IQ'):'',subjects.join('، '),sections.join('، '),weekly,t.notes||'']);});
   const csv=rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');
-  downloadTextFile('Masar-Teacher-Accounts.csv',csv,'text/csv;charset=utf-8');
+  downloadTextFile('Masar-Teacher-Accounts-Full.csv',csv,'text/csv;charset=utf-8');
 }
 async function deleteSchoolUser(profileId, teacherId=''){
   const p=(state.profiles||[]).find(x=>String(x.id)===String(profileId)); if(!p)return alert('تعذر العثور على الحساب.');
@@ -764,10 +774,10 @@ function openProfileEditModal(profileId, teacherId='') {
   const t=state.teachers.find(x=>String(x.id)===String(teacherId));
   if(!p && !t) return alert('تعذر العثور على الملف.');
   const userId=p?.id || t?.user_id; const profile=p || (state.profiles||[]).find(x=>String(x.id)===String(userId));
-  showModal(modal('تعديل الملف الشخصي',`<form id="profileEditForm"><input id="editProfileId" type="hidden" value="${safeText(userId||'')}"><input id="editTeacherId" type="hidden" value="${safeText(t?.id||'')}"><div class="field"><label>الاسم الكامل</label><input id="editProfileName" required value="${safeText(profile?.full_name||t?.name||'')}"></div><div class="field"><label>اسم المستخدم</label><input id="editProfileUsername" dir="ltr" value="${safeText(profile?.username||'')}"></div><div class="field"><label>الهاتف</label><input id="editProfilePhone" value="${safeText(profile?.phone||'')}"></div>${t?`<div class="field"><label>الرقم الوظيفي</label><input id="editTeacherCode" value="${safeText(t.employee_code||'')}"></div><div class="field"><label>التخصص</label><input id="editTeacherSpecialization" value="${safeText(t.specialization||'')}"></div>`:''}<label style="display:flex;gap:8px;align-items:center;margin:10px 0"><input id="editProfileActive" type="checkbox" ${profile?.is_active!==false?'checked':''}> الحساب فعال</label><button class="btn btn-primary" type="submit">حفظ التعديلات</button></form>`));
+  showModal(modal('تعديل الملف الشخصي',`<form id="profileEditForm"><input id="editProfileId" type="hidden" value="${safeText(userId||'')}"><input id="editTeacherId" type="hidden" value="${safeText(t?.id||'')}"><div class="field"><label>الاسم الكامل</label><input id="editProfileName" required value="${safeText(profile?.full_name||t?.name||'')}"></div><div class="field"><label>اسم المستخدم</label><input id="editProfileUsername" dir="ltr" value="${safeText(profile?.username||'')}"></div><div class="field"><label>الهاتف</label><input id="editProfilePhone" value="${safeText(profile?.phone||'')}"></div>${t?`<div class="field"><label>الرقم الوظيفي</label><input id="editTeacherCode" value="${safeText(t.employee_code||'')}"></div><div class="field"><label>التخصص</label><input id="editTeacherSpecialization" value="${safeText(t.specialization||'')}"></div><div class="field"><label>ملاحظات إدارية</label><textarea id="editTeacherNotes" rows="3">${safeText(t.notes||'')}</textarea></div>`:''}<label style="display:flex;gap:8px;align-items:center;margin:10px 0"><input id="editProfileActive" type="checkbox" ${profile?.is_active!==false?'checked':''}> الحساب فعال</label><button class="btn btn-primary" type="submit">حفظ التعديلات</button></form>`));
   $('#profileEditForm')?.addEventListener('submit',saveProfileEdit);
 }
-async function saveProfileEdit(e){e.preventDefault();try{const pid=$('#editProfileId').value,tid=$('#editTeacherId').value;const fullName=$('#editProfileName').value.trim();if(pid){const {error}=await supabaseClient.from('profiles').update({full_name:fullName,username:normalizeUsername($('#editProfileUsername').value),phone:$('#editProfilePhone').value.trim()||null,is_active:$('#editProfileActive').checked}).eq('id',pid);if(error)throw error;}if(tid){const {error:te}=await supabaseClient.from('teachers').update({full_name:fullName,employee_code:$('#editTeacherCode').value.trim()||null,specialization:$('#editTeacherSpecialization').value.trim()||null,phone:$('#editProfilePhone').value.trim()||null}).eq('id',tid);if(te)throw te;}await loadSchoolData();$('.modal-backdrop')?.remove();render();}catch(err){alert('تعذر حفظ الملف: '+(err?.message||'خطأ غير معروف'));}}
+async function saveProfileEdit(e){e.preventDefault();try{const pid=$('#editProfileId').value,tid=$('#editTeacherId').value;const fullName=$('#editProfileName').value.trim();if(pid){const {error}=await supabaseClient.from('profiles').update({full_name:fullName,username:normalizeUsername($('#editProfileUsername').value),phone:$('#editProfilePhone').value.trim()||null,is_active:$('#editProfileActive').checked}).eq('id',pid);if(error)throw error;}if(tid){const {error:te}=await supabaseClient.from('teachers').update({full_name:fullName,employee_code:$('#editTeacherCode').value.trim()||null,specialization:$('#editTeacherSpecialization').value.trim()||null,phone:$('#editProfilePhone').value.trim()||null,notes:$('#editTeacherNotes')?.value.trim()||null}).eq('id',tid);if(te)throw te;}await loadSchoolData();$('.modal-backdrop')?.remove();render();}catch(err){alert('تعذر حفظ الملف: '+(err?.message||'خطأ غير معروف'));}}
 
 function openTeacherProfileModal(teacherId){ const t=state.teachers.find(x=>String(x.id)===String(teacherId)); if(!t)return; openProfileEditModal(t.user_id,t.id); }
 
@@ -2019,17 +2029,24 @@ function personalTimetableGrid(rows, mode) {
   const days=[1,2,3,4,5], max=timetableMaxPeriods();
   return `<div class="tt-scroll"><table class="tt-personal"><thead><tr><th class="tt-corner">اليوم / الحصة</th>${Array.from({length:max},(_,i)=>`<th>الحصة ${i+1}</th>`).join('')}</tr></thead><tbody>${days.map(d=>`<tr><th>${DAYS[d]}</th>${Array.from({length:max},(_,i)=>{const p=i+1;if(p>timetableDayPeriods(d))return '<td class="tt-closed">—</td>';const r=rows.find(x=>Number(x.dayOfWeek)===d&&Number(x.period)===p);return `<td>${timetableCellContent(r,mode)}</td>`}).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
+const STAGE_COLORS={1:'#2f6f9f',2:'#2f7d69',3:'#8a6a32',4:'#76528f',5:'#a65b5b',6:'#4d6478'};
+function gradeStageLevel(sec){
+  const direct=Number(sec.gradeLevel||state.grades.find(g=>String(g.id)===String(sec.grade_id))?.level); if(direct>=1&&direct<=6)return direct;
+  const n=String(sec.grade||''); const words=[['الأول','الاول'],['الثاني'],['الثالث'],['الرابع'],['الخامس'],['السادس']];
+  const i=words.findIndex(xs=>xs.some(x=>n.includes(x))); return i>=0?i+1:99;
+}
+function sectionNaturalCompare(a,b){return String(a.section||'').localeCompare(String(b.section||''),'ar',{numeric:true,sensitivity:'base'});}
 function schoolTimetableGrid() {
   const days=[1,2,3,4,5].filter(d=>timetableDayPeriods(d)>0);
-  const sections=[...new Map(state.sections.map(sec=>[String(sec.id),{id:sec.id,grade:(state.grades.find(g=>String(g.id)===String(sec.grade_id))?.name||''),section:sec.name}])).values()].sort((a,b)=>(a.grade+' '+a.section).localeCompare(b.grade+' '+b.section,'ar'));
+  const sections=[...new Map(state.sections.map(sec=>[String(sec.id),{id:sec.id,grade:sec.grade||'',grade_id:sec.grade_id,gradeLevel:sec.gradeLevel,section:sec.name}])).values()].sort((a,b)=>gradeStageLevel(a)-gradeStageLevel(b)||sectionNaturalCompare(a,b));
   if(!sections.length) return '<div class="notice">لا توجد شعب مسجلة.</div>';
-  const header=`<tr><th class="tt-day-col">اليوم</th><th class="tt-period-col">الحصة</th>${sections.map(sec=>`<th class="tt-section-head">${safeText(sec.grade)}<small>${safeText(sec.section)}</small></th>`).join('')}</tr>`;
+  const header=`<tr><th class="tt-day-col">اليوم</th><th class="tt-period-col">الحصة</th>${sections.map(sec=>{const stage=gradeStageLevel(sec),color=STAGE_COLORS[stage]||'#64748b';return `<th class="tt-section-head tt-stage-${stage}" style="--stage-color:${color}">${safeText(sec.grade)}<small>${safeText(sec.section)}</small></th>`}).join('')}</tr>`;
   const body=days.map(d=>Array.from({length:timetableDayPeriods(d)},(_,i)=>{
     const period=i+1;
-    const cells=sections.map(sec=>{const r=state.timetable.find(x=>String(x.sectionId)===String(sec.id)&&Number(x.dayOfWeek)===d&&Number(x.period)===period);return `<td>${timetableCellContent(r,'school')}</td>`}).join('');
+    const cells=sections.map(sec=>{const stage=gradeStageLevel(sec),color=STAGE_COLORS[stage]||'#64748b';const r=state.timetable.find(x=>String(x.sectionId)===String(sec.id)&&Number(x.dayOfWeek)===d&&Number(x.period)===period);return `<td class="tt-stage-cell tt-stage-${stage}" style="--stage-color:${color}">${timetableCellContent(r,'school')}</td>`}).join('');
     return `<tr>${period===1?`<th rowspan="${timetableDayPeriods(d)}" class="tt-day-name">${safeText(DAYS[d])}</th>`:''}<th class="tt-period-no">${period}</th>${cells}</tr>`;
   }).join('')).join('');
-  return `<div class="tt-scroll tt-school-wrap"><table class="tt-school tt-school-master"><thead>${header}</thead><tbody>${body}</tbody></table></div>`;
+  return `<div class="tt-stage-legend">${[1,2,3,4,5,6].map(n=>`<span style="--stage-color:${STAGE_COLORS[n]}"><i></i>${['الأول','الثاني','الثالث','الرابع','الخامس','السادس'][n-1]}</span>`).join('')}</div><div class="tt-scroll tt-school-wrap"><table class="tt-school tt-school-master"><thead>${header}</thead><tbody>${body}</tbody></table></div>`;
 }
 function timetableDiagnostics(rows=state.timetable){
   const errors=[], warnings=[];

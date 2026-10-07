@@ -99,3 +99,8 @@ body:has(.modal-backdrop){overflow:hidden;}
 }
 /* v1.8.1 bulk staff import */
 .modal textarea{width:100%;border:1px solid var(--border);border-radius:12px;padding:12px 14px;background:#fff;outline:none;font:inherit;resize:vertical;min-height:140px}.modal textarea:focus{border-color:#8db5ff;box-shadow:0 0 0 3px rgba(20,84,196,.08)}
+
+/* Masar v1.8.2 — stage identity + complete staff register */
+.tt-stage-legend{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px}.tt-stage-legend span{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border:1px solid #d9e0e8;border-radius:999px;background:#fff;font-size:11px;font-weight:800}.tt-stage-legend i{width:10px;height:10px;border-radius:50%;background:var(--stage-color)}
+.tt-school-master .tt-section-head{background:color-mix(in srgb,var(--stage-color) 14%,white)!important;color:#17243b!important;border-top:5px solid var(--stage-color)!important}.tt-school-master .tt-section-head small{color:color-mix(in srgb,var(--stage-color) 75%,#334155)!important}.tt-school-master .tt-stage-cell{border-top-color:color-mix(in srgb,var(--stage-color) 35%,#cbd5e1)!important}.tt-school-master .tt-stage-cell:empty{background:color-mix(in srgb,var(--stage-color) 3%,white)!important}
+@media print{.tt-stage-legend{display:none!important}.tt-school-master .tt-section-head{background:color-mix(in srgb,var(--stage-color) 14%,white)!important;border-top:4px solid var(--stage-color)!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
