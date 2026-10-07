@@ -1,7 +1,7 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
-const MASAR_VERSION = '1.7.1';
+const MASAR_VERSION = '1.8.0';
 const MASAR_DB_TARGET = 3;
 
 const DAYS = {
@@ -420,6 +420,8 @@ async function loadSchoolData() {
         subject: subject?.name || '',
         grade: grade?.name || '',
         section: section?.name || '',
+        sectionId: assignment.section_id,
+        subjectId: assignment.subject_id,
         day: DAYS[tt.day_of_week] || String(tt.day_of_week),
         dayOfWeek: tt.day_of_week,
         period: tt.period_number,
@@ -690,11 +692,11 @@ function dashboardView() {
 ========================================================= */
 
 function credentialsStore(){
-  try { return JSON.parse(localStorage.getItem('masar_teacher_credentials') || '{}'); } catch { return {}; }
+  try { return JSON.parse(sessionStorage.getItem('masar_teacher_credentials') || '{}'); } catch { return {}; }
 }
 function saveCredential(userId, row){
   const all=credentialsStore(); all[String(userId || row.username)]={...row, saved_at:new Date().toISOString()};
-  localStorage.setItem('masar_teacher_credentials', JSON.stringify(all));
+  sessionStorage.setItem('masar_teacher_credentials', JSON.stringify(all));
 }
 function teacherCredential(t){
   const all=credentialsStore(); return all[String(t.user_id)] || Object.values(all).find(x=>x.username && x.username===(state.profiles||[]).find(p=>String(p.id)===String(t.user_id))?.username) || null;
@@ -739,7 +741,7 @@ async function deleteSchoolUser(profileId, teacherId=''){
   if(!confirm(`حذف حساب ${p.full_name} نهائياً؟\nلن يتم حذف السجلات الدراسية التاريخية.`))return;
   try{
     const {data,error}=await supabaseClient.functions.invoke('delete-school-user',{body:{user_id:profileId,teacher_id:teacherId||null}}); if(error)throw error; if(!data?.ok)throw new Error(data?.error||'تعذر حذف الحساب.');
-    const all=credentialsStore(); delete all[String(profileId)]; localStorage.setItem('masar_teacher_credentials',JSON.stringify(all));
+    const all=credentialsStore(); delete all[String(profileId)]; sessionStorage.setItem('masar_teacher_credentials',JSON.stringify(all));
     await loadSchoolData();render();
   }catch(e){alert('تعذر حذف المستخدم: '+(e?.message||'تأكد من نشر وظيفة delete-school-user في Supabase.'));}
 }
@@ -751,7 +753,7 @@ function usersView() {
     <div class="grid two-col">
       <div class="card"><h3>حسابات الإدارة</h3>${table(admins,['الاسم','اسم المستخدم','الهاتف','الحالة','إجراءات'],p=>[safeText(p.full_name),safeText(p.username||''),safeText(p.phone||''),p.is_active!==false?'<span class="badge badge-success">فعال</span>':'<span class="badge">موقوف</span>',`<button class="btn btn-soft btn-sm" data-edit-profile="${p.id}">تعديل</button> <button class="btn btn-danger btn-sm" data-delete-user="${p.id}">حذف</button>`])}</div>
       <div class="card"><h3>حسابات المدرسين</h3>${table(state.teachers,['الاسم','التخصص','اسم المستخدم','إجراءات'],t=>{const p=(state.profiles||[]).find(x=>String(x.id)===String(t.user_id));return [safeText(t.name),safeText(t.specialization||''),safeText(p?.username||''),`<button class="btn btn-soft btn-sm" data-edit-teacher="${t.id}">الملف</button> <button class="btn btn-soft btn-sm" data-add-assignment="${t.id}">+ تكليف</button> <button class="btn btn-soft btn-sm" data-download-credential="${t.id}">تنزيل البيانات</button> ${t.user_id?`<button class="btn btn-danger btn-sm" data-delete-user="${t.user_id}" data-delete-teacher="${t.id}">حذف الحساب</button>`:''}`];})}</div>
-    </div><div class="notice" style="margin-top:12px">الرمز المؤقت يُحفظ محلياً على جهاز الإدارة عند إنشاء الحساب فقط. إذا لم يعد متاحاً، أنشئ رمزاً مؤقتاً جديداً بدلاً من محاولة قراءة كلمة المرور الحالية.</div>`;
+    </div><div class="notice" style="margin-top:12px">لأمان أعلى، الرمز المؤقت يبقى في جلسة الإدارة الحالية فقط ولا يُخزن بشكل دائم على الجهاز. نزّل سجل الحسابات قبل إغلاق الجلسة، وإذا لم يعد الرمز متاحاً فأعد تعيينه.</div>`;
 }
 
 function randomUsername(name='user') { return `${String(name).toLowerCase().replace(/[^a-z]/g,'').slice(0,4)||'user'}${random4()}`; }
@@ -1949,13 +1951,16 @@ function personalTimetableGrid(rows, mode) {
   return `<div class="tt-scroll"><table class="tt-personal"><thead><tr><th class="tt-corner">اليوم / الحصة</th>${Array.from({length:max},(_,i)=>`<th>الحصة ${i+1}</th>`).join('')}</tr></thead><tbody>${days.map(d=>`<tr><th>${DAYS[d]}</th>${Array.from({length:max},(_,i)=>{const p=i+1;if(p>timetableDayPeriods(d))return '<td class="tt-closed">—</td>';const r=rows.find(x=>Number(x.dayOfWeek)===d&&Number(x.period)===p);return `<td>${timetableCellContent(r,mode)}</td>`}).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
 function schoolTimetableGrid() {
-  const days=[1,2,3,4,5];
+  const days=[1,2,3,4,5].filter(d=>timetableDayPeriods(d)>0);
   const sections=[...new Map(state.sections.map(sec=>[String(sec.id),{id:sec.id,grade:(state.grades.find(g=>String(g.id)===String(sec.grade_id))?.name||''),section:sec.name}])).values()].sort((a,b)=>(a.grade+' '+a.section).localeCompare(b.grade+' '+b.section,'ar'));
   if(!sections.length) return '<div class="notice">لا توجد شعب مسجلة.</div>';
-  const head1=days.map(d=>`<th colspan="${timetableDayPeriods(d)}" class="tt-day-group">${DAYS[d]}</th>`).join('');
-  const head2=days.map(d=>Array.from({length:timetableDayPeriods(d)},(_,i)=>`<th>${i+1}</th>`).join('')).join('');
-  const body=sections.map(sec=>`<tr><th class="tt-section-name">${safeText(sec.grade)} / ${safeText(sec.section)}</th>${days.map(d=>Array.from({length:timetableDayPeriods(d)},(_,i)=>{const r=state.timetable.find(x=>x.grade===sec.grade&&x.section===sec.section&&Number(x.dayOfWeek)===d&&Number(x.period)===i+1);return `<td>${timetableCellContent(r,'school')}</td>`}).join('')).join('')}</tr>`).join('');
-  return `<div class="tt-scroll tt-school-wrap"><table class="tt-school"><thead><tr><th rowspan="2" class="tt-section-name">الصف / الشعبة</th>${head1}</tr><tr>${head2}</tr></thead><tbody>${body}</tbody></table></div>`;
+  const header=`<tr><th class="tt-day-col">اليوم</th><th class="tt-period-col">الحصة</th>${sections.map(sec=>`<th class="tt-section-head">${safeText(sec.grade)}<small>${safeText(sec.section)}</small></th>`).join('')}</tr>`;
+  const body=days.map(d=>Array.from({length:timetableDayPeriods(d)},(_,i)=>{
+    const period=i+1;
+    const cells=sections.map(sec=>{const r=state.timetable.find(x=>String(x.sectionId)===String(sec.id)&&Number(x.dayOfWeek)===d&&Number(x.period)===period);return `<td>${timetableCellContent(r,'school')}</td>`}).join('');
+    return `<tr>${period===1?`<th rowspan="${timetableDayPeriods(d)}" class="tt-day-name">${safeText(DAYS[d])}</th>`:''}<th class="tt-period-no">${period}</th>${cells}</tr>`;
+  }).join('')).join('');
+  return `<div class="tt-scroll tt-school-wrap"><table class="tt-school tt-school-master"><thead>${header}</thead><tbody>${body}</tbody></table></div>`;
 }
 function timetableDiagnostics(rows=state.timetable){
   const errors=[], warnings=[];
@@ -1967,7 +1972,16 @@ function timetableDiagnostics(rows=state.timetable){
     if(Number(r.period)>timetableDayPeriods(Number(r.dayOfWeek))) errors.push(`حصة خارج عدد حصص ${DAYS[r.dayOfWeek]}: ${r.grade}/${r.section} الحصة ${r.period}`);
     const k=`${r.grade}|${r.section}|${r.subject}|${r.dayOfWeek}`; subjDay.set(k,(subjDay.get(k)||0)+1);
   }
-  for(const [k,n] of subjDay) if(n>1){const [g,sec,sub,d]=k.split('|');warnings.push(`تكررت ${sub} في ${g}/${sec} يوم ${DAYS[+d]} (${n} حصص)`)}
+  for(const [k,n] of subjDay) if(n>1){
+    const [g,sec,sub,d]=k.split('|');
+    const sample=rows.find(r=>r.grade===g&&r.section===sec&&r.subject===sub&&Number(r.dayOfWeek)===Number(d));
+    const a=state.assignments.find(x=>String(x.id)===String(sample?.assignmentId));
+    const weekly=Number((state.timetableRules||[]).find(x=>String(x.assignment_id)===String(a?.id))?.weekly_periods||0);
+    const active=[1,2,3,4,5].filter(day=>timetableDayPeriods(day)>0);
+    const available=a?active.filter(day=>Array.from({length:timetableDayPeriods(day)},(_,i)=>i+1).some(p=>!((state.teacherAvailability||[]).find(x=>String(x.teacher_id)===String(a.teacher_id)&&Number(x.day_of_week)===day&&Number(x.period_number)===p)?.preference==='blocked'))):active;
+    if(!weekly || weekly<=available.length) warnings.push(`تكررت ${sub} في ${g}/${sec} يوم ${DAYS[+d]} دون ضرورة توزيع واضحة (${n} حصص)`);
+    else if(n>2) errors.push(`تكررت ${sub} أكثر من مرتين في ${g}/${sec} يوم ${DAYS[+d]}`);
+  }
   return {errors:[...new Set(errors)],warnings:[...new Set(warnings)]};
 }
 function timetableHealthHtml(){const d=timetableDiagnostics();const cls=d.errors.length?'tt-health-danger':d.warnings.length?'tt-health-warning':'tt-health-ok';const text=d.errors.length?`✕ ${d.errors.length} تضارب حرج`:d.warnings.length?`⚠ ${d.warnings.length} تحذير`:'✓ لا توجد تعارضات';return `<button class="tt-health ${cls}" data-action="show-timetable-issues">${text}</button>`;}
@@ -2159,7 +2173,7 @@ async function runSmartGenerator(){
     for(const x of locked){const k=`${x.assignmentId}-${x.dayOfWeek}`;assignmentDayCount.set(k,(assignmentDayCount.get(k)||0)+1);}
     const teacherDayLoad=new Map(); for(const x of locked){const k=`${x.teacherId}-${x.dayOfWeek}`;teacherDayLoad.set(k,(teacherDayLoad.get(k)||0)+1);}
     const teacherAvailableDays=a=>activeDays.filter(d=>Array.from({length:timetableDayPeriods(d)},(_,i)=>i+1).some(p=>(prefMap.get(`${a.teacher_id}-${d}-${p}`)||'available')!=='blocked'));
-    const slotsFor=a=>{const arr=[];const weeklyNeed=weekly.get(String(a.id))||1;const availDays=teacherAvailableDays(a);const repeatRequired=weeklyNeed>availDays.length;for(const d of activeDays)for(let p=1;p<=timetableDayPeriods(d);p++){const pref=prefMap.get(`${a.teacher_id}-${d}-${p}`)||'available';if(pref==='blocked')continue;const sameDay=assignmentDayCount.get(`${a.id}-${d}`)||0;if(sameDay>0&&!repeatRequired)continue;let score=pref==='preferred'?0:pref==='available'?10:30;score+=(teacherDayLoad.get(`${a.teacher_id}-${d}`)||0)*8;score+=sameDay*60;arr.push({d,p,pref,score});}return arr.sort((x,y)=>x.score-y.score||x.d-y.d||x.p-y.p)};
+    const slotsFor=a=>{const arr=[];const weeklyNeed=weekly.get(String(a.id))||1;const availDays=teacherAvailableDays(a);const repeatRequired=weeklyNeed>availDays.length;for(const d of activeDays)for(let p=1;p<=timetableDayPeriods(d);p++){const pref=prefMap.get(`${a.teacher_id}-${d}-${p}`)||'available';if(pref==='blocked')continue;const sameDay=assignmentDayCount.get(`${a.id}-${d}`)||0;if(sameDay>0&&!repeatRequired)continue;if(sameDay>=2)continue;let score=pref==='preferred'?0:pref==='available'?10:30;score+=(teacherDayLoad.get(`${a.teacher_id}-${d}`)||0)*8;score+=sameDay*60;arr.push({d,p,pref,score});}return arr.sort((x,y)=>x.score-y.score||x.d-y.d||x.p-y.p)};
     tasks.sort((a,b)=>slotsFor(a).length-slotsFor(b).length);
     const result=[];
     function place(i){if(i===tasks.length)return true;const a=tasks[i];for(const sl of slotsFor(a)){const tk=`${a.teacher_id}-${sl.d}-${sl.p}`,sk=`${a.section_id}-${sl.d}-${sl.p}`;if(teacherBusy.has(tk)||sectionBusy.has(sk))continue;teacherBusy.add(tk);sectionBusy.add(sk);const ad=`${a.id}-${sl.d}`,td=`${a.teacher_id}-${sl.d}`;assignmentDayCount.set(ad,(assignmentDayCount.get(ad)||0)+1);teacherDayLoad.set(td,(teacherDayLoad.get(td)||0)+1);result.push({assignment_id:a.id,day_of_week:sl.d,period_number:sl.p,room:null,is_active:true,is_locked:false});if(place(i+1))return true;result.pop();assignmentDayCount.set(ad,assignmentDayCount.get(ad)-1);teacherDayLoad.set(td,teacherDayLoad.get(td)-1);teacherBusy.delete(tk);sectionBusy.delete(sk);}return false;}
@@ -2180,7 +2194,35 @@ function openTimetableModal() {
   showModal(modal('إضافة حصة',`<form id="timetableForm"><div class="field"><label>التكليف</label><select id="timetableAssignment" required><option value="">اختر التكليف</option>${state.assignments.map(a=>{const t=teacherById(a.teacher_id),s=subjectById(a.subject_id),sec=sectionById(a.section_id);return `<option value="${a.id}">${safeText(t?.name||'مدرس')} — ${safeText(s?.name||'')} — ${safeText(sec?.grade||'')}/${safeText(sec?.name||'')}</option>`}).join('')}</select></div><div class="field"><label>اليوم</label><select id="timetableDay" required>${Object.entries(DAYS).map(([id,name])=>`<option value="${id}">${name}</option>`).join('')}</select></div><div class="field"><label>رقم الحصة</label><input id="timetablePeriod" type="number" min="1" max="12" required></div><div class="field"><label>القاعة</label><input id="timetableRoom"></div><button id="saveTimetableButton" class="btn btn-primary" type="submit">إضافة الحصة</button><div id="timetableFormMessage" class="notice" style="display:none;margin-top:12px"></div></form>`));
   $('#timetableForm')?.addEventListener('submit', saveTimetable);
 }
-async function saveTimetable(event){event.preventDefault();const message=$('#timetableFormMessage'),button=$('#saveTimetableButton');const assignmentId=$('#timetableAssignment')?.value,day=Number($('#timetableDay')?.value),period=Number($('#timetablePeriod')?.value);const a=state.assignments.find(x=>String(x.id)===String(assignmentId));if(!a||!day||!period)return;if(period>timetableDayPeriods(day)){message.style.display='block';message.textContent=`تعارض: ${DAYS[day]} يحتوي ${timetableDayPeriods(day)} حصص فقط.`;return;}const tc=state.timetable.find(x=>String(x.teacherId)===String(a.teacher_id)&&Number(x.dayOfWeek)===day&&Number(x.period)===period);const sec=sectionById(a.section_id);const sc=state.timetable.find(x=>x.grade===(state.grades.find(g=>String(g.id)===String(sec?.grade_id))?.name||'')&&x.section===sec?.name&&Number(x.dayOfWeek)===day&&Number(x.period)===period);if(tc||sc){message.style.display='block';message.textContent=tc?`تعارض: المدرس لديه حصة أخرى في ${DAYS[day]} / الحصة ${period}.`:`تعارض: الشعبة لديها حصة أخرى في ${DAYS[day]} / الحصة ${period}.`;return;}const payload={assignment_id:assignmentId,day_of_week:day,period_number:period,room:$('#timetableRoom')?.value.trim()||null,is_active:true,is_locked:false};try{button.disabled=true;button.textContent='جارٍ الحفظ...';const {error}=await supabaseClient.from('timetable').insert(payload);if(error)throw error;await loadSchoolData();$('.modal-backdrop')?.remove();render();}catch(error){message.style.display='block';message.textContent='تعذر حفظ الحصة: '+(error?.message||'خطأ غير معروف');button.disabled=false;button.textContent='إضافة الحصة';}}
+async function saveTimetable(event){
+  event.preventDefault();
+  const message=$('#timetableFormMessage'),button=$('#saveTimetableButton');
+  const assignmentId=$('#timetableAssignment')?.value,day=Number($('#timetableDay')?.value),period=Number($('#timetablePeriod')?.value);
+  const a=state.assignments.find(x=>String(x.id)===String(assignmentId)); if(!a||!day||!period)return;
+  const fail=text=>{message.style.display='block';message.textContent=text;};
+  try{
+    await loadTimetablePreferences();
+    if(timetableDayPeriods(day)<=0) return fail(`تعارض: ${DAYS[day]} ليس يوم دوام.`);
+    if(period>timetableDayPeriods(day)) return fail(`تعارض: ${DAYS[day]} يحتوي ${timetableDayPeriods(day)} حصص فقط.`);
+    const pref=(state.teacherAvailability||[]).find(x=>String(x.teacher_id)===String(a.teacher_id)&&Number(x.day_of_week)===day&&Number(x.period_number)===period)?.preference;
+    if(pref==='blocked') return fail(`تعارض: هذه الحصة ضمن وقت التفرغ/الاستثناء الخاص بالمدرس.`);
+    const tc=state.timetable.find(x=>String(x.teacherId)===String(a.teacher_id)&&Number(x.dayOfWeek)===day&&Number(x.period)===period);
+    const sc=state.timetable.find(x=>String(x.sectionId)===String(a.section_id)&&Number(x.dayOfWeek)===day&&Number(x.period)===period);
+    if(tc||sc) return fail(tc?`تعارض: المدرس لديه حصة أخرى في ${DAYS[day]} / الحصة ${period}.`:`تعارض: الشعبة لديها حصة أخرى في ${DAYS[day]} / الحصة ${period}.`);
+    const sameAssignmentDay=state.timetable.filter(x=>String(x.assignmentId)===String(a.id)&&Number(x.dayOfWeek)===day).length;
+    if(sameAssignmentDay){
+      const weekly=Number((state.timetableRules||[]).find(r=>String(r.assignment_id)===String(a.id))?.weekly_periods||1);
+      const activeDays=[1,2,3,4,5].filter(d=>timetableDayPeriods(d)>0);
+      const availableDays=activeDays.filter(d=>Array.from({length:timetableDayPeriods(d)},(_,i)=>i+1).some(p=>!((state.teacherAvailability||[]).find(x=>String(x.teacher_id)===String(a.teacher_id)&&Number(x.day_of_week)===d&&Number(x.period_number)===p)?.preference==='blocked')));
+      if(weekly<=availableDays.length) return fail('تعارض: لا يجوز تكرار المادة للشعبة في اليوم نفسه ما دام يمكن توزيع حصصها على أيام دوام المدرس.');
+      if(sameAssignmentDay>=1) return fail('تعارض: الاستثناء يسمح بتكرار المادة مرة واحدة فقط عند ضرورة التوزيع بسبب أيام تفرغ المدرس.');
+    }
+    button.disabled=true;button.textContent='جارٍ الحفظ...';
+    const payload={assignment_id:assignmentId,day_of_week:day,period_number:period,room:$('#timetableRoom')?.value.trim()||null,is_active:true,is_locked:false};
+    const {error}=await supabaseClient.from('timetable').insert(payload);if(error)throw error;
+    await loadSchoolData();$('.modal-backdrop')?.remove();render();
+  }catch(error){fail('تعذر حفظ الحصة: '+(error?.message||'خطأ غير معروف'));button.disabled=false;button.textContent='إضافة الحصة';}
+}
 async function deleteTimetable(id){if(!confirm('هل تريد حذف هذه الحصة؟'))return;try{const {error}=await supabaseClient.from('timetable').delete().eq('id',id);if(error)throw error;await loadSchoolData();render();}catch(error){alert('تعذر حذف الحصة: '+(error?.message||'خطأ غير معروف'));}}
 
 /* =========================================================

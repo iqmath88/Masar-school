@@ -21,3 +21,6 @@
 
 ## الخطوة التالية
 ربط الواجهة بـ Supabase Auth والجداول الفعلية، ثم استبدال بيانات العرض المحلية بالبيانات الحقيقية وتطبيق الصلاحيات على قاعدة البيانات.
+
+## Current stabilization release
+Masar v1.8.0 — Production Stabilization. Run `UPDATE_DATABASE_v1.8.0.sql` before deploying the v1.8.0 frontend.

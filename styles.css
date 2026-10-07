@@ -74,3 +74,26 @@ body:has(.modal-backdrop){overflow:hidden;}
   .tt-school td{height:48px!important;padding:1px!important}
   .tt-entry strong{font-size:8px!important}.tt-entry small{font-size:7px!important}
 }
+
+/* =========================================================
+   v1.8.0 — Reference master timetable layout
+   columns = sections, rows = day/period
+========================================================= */
+.tt-school-master{width:max-content!important;min-width:100%!important;table-layout:fixed!important}
+.tt-school-master .tt-day-col{width:54px;min-width:54px}
+.tt-school-master .tt-period-col{width:48px;min-width:48px}
+.tt-school-master .tt-section-head{width:112px;min-width:112px;max-width:112px;padding:7px 3px!important}
+.tt-school-master .tt-section-head small{display:block;font-size:9px;margin-top:2px;color:#52657e}
+.tt-school-master .tt-day-name{width:54px;min-width:54px;background:#dfe8f7!important;color:#0f2c61!important;font-size:12px;font-weight:900;writing-mode:vertical-rl;transform:rotate(180deg);letter-spacing:.5px}
+.tt-school-master .tt-period-no{width:48px;min-width:48px;background:#f4f7fb!important;color:#17336b;font-weight:900}
+.tt-school-master td{width:112px;min-width:112px;max-width:112px;height:58px!important;padding:3px!important}
+.tt-school-master .tt-entry{min-width:0!important;width:100%!important}
+@media print{
+  .tt-school-master{width:100%!important;min-width:0!important;font-size:7px!important}
+  .tt-school-master .tt-section-head,.tt-school-master td{width:auto!important;min-width:0!important;max-width:none!important}
+  .tt-school-master .tt-day-col,.tt-school-master .tt-day-name{width:34px!important;min-width:34px!important}
+  .tt-school-master .tt-period-col,.tt-school-master .tt-period-no{width:28px!important;min-width:28px!important}
+  .tt-school-master td{height:36px!important}
+  .tt-school-master .tt-entry strong{font-size:7px!important}
+  .tt-school-master .tt-entry small{font-size:6px!important}
+}
