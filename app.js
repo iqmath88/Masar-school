@@ -1,7 +1,7 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
-const MASAR_VERSION = '1.8.0';
+const MASAR_VERSION = '1.8.1';
 const MASAR_DB_TARGET = 3;
 
 const DAYS = {
@@ -299,7 +299,7 @@ async function loadSchoolData() {
 
     supabaseClient
       .from('teachers')
-      .select('id, user_id, employee_code, specialization'),
+      .select('id, user_id, full_name, employee_code, specialization, phone'),
 
     supabaseClient
       .from('teacher_assignments')
@@ -395,7 +395,7 @@ async function loadSchoolData() {
 
   state.teachers = state.teachers.map(t => ({
     ...t,
-    name: profileNames.get(t.user_id) || t.employee_code || 'مدرس',
+    name: profileNames.get(t.user_id) || t.full_name || t.employee_code || 'مدرس',
     subject: t.specialization || ''
   }));
 
@@ -767,7 +767,7 @@ function openProfileEditModal(profileId, teacherId='') {
   showModal(modal('تعديل الملف الشخصي',`<form id="profileEditForm"><input id="editProfileId" type="hidden" value="${safeText(userId||'')}"><input id="editTeacherId" type="hidden" value="${safeText(t?.id||'')}"><div class="field"><label>الاسم الكامل</label><input id="editProfileName" required value="${safeText(profile?.full_name||t?.name||'')}"></div><div class="field"><label>اسم المستخدم</label><input id="editProfileUsername" dir="ltr" value="${safeText(profile?.username||'')}"></div><div class="field"><label>الهاتف</label><input id="editProfilePhone" value="${safeText(profile?.phone||'')}"></div>${t?`<div class="field"><label>الرقم الوظيفي</label><input id="editTeacherCode" value="${safeText(t.employee_code||'')}"></div><div class="field"><label>التخصص</label><input id="editTeacherSpecialization" value="${safeText(t.specialization||'')}"></div>`:''}<label style="display:flex;gap:8px;align-items:center;margin:10px 0"><input id="editProfileActive" type="checkbox" ${profile?.is_active!==false?'checked':''}> الحساب فعال</label><button class="btn btn-primary" type="submit">حفظ التعديلات</button></form>`));
   $('#profileEditForm')?.addEventListener('submit',saveProfileEdit);
 }
-async function saveProfileEdit(e){e.preventDefault();try{const pid=$('#editProfileId').value,tid=$('#editTeacherId').value;const {error}=await supabaseClient.from('profiles').update({full_name:$('#editProfileName').value.trim(),username:normalizeUsername($('#editProfileUsername').value),phone:$('#editProfilePhone').value.trim()||null,is_active:$('#editProfileActive').checked}).eq('id',pid);if(error)throw error;if(tid){const {error:te}=await supabaseClient.from('teachers').update({employee_code:$('#editTeacherCode').value.trim()||null,specialization:$('#editTeacherSpecialization').value.trim()||null}).eq('id',tid);if(te)throw te;}await loadSchoolData();$('.modal-backdrop')?.remove();render();}catch(err){alert('تعذر حفظ الملف: '+(err?.message||'خطأ غير معروف'));}}
+async function saveProfileEdit(e){e.preventDefault();try{const pid=$('#editProfileId').value,tid=$('#editTeacherId').value;const fullName=$('#editProfileName').value.trim();if(pid){const {error}=await supabaseClient.from('profiles').update({full_name:fullName,username:normalizeUsername($('#editProfileUsername').value),phone:$('#editProfilePhone').value.trim()||null,is_active:$('#editProfileActive').checked}).eq('id',pid);if(error)throw error;}if(tid){const {error:te}=await supabaseClient.from('teachers').update({full_name:fullName,employee_code:$('#editTeacherCode').value.trim()||null,specialization:$('#editTeacherSpecialization').value.trim()||null,phone:$('#editProfilePhone').value.trim()||null}).eq('id',tid);if(te)throw te;}await loadSchoolData();$('.modal-backdrop')?.remove();render();}catch(err){alert('تعذر حفظ الملف: '+(err?.message||'خطأ غير معروف'));}}
 
 function openTeacherProfileModal(teacherId){ const t=state.teachers.find(x=>String(x.id)===String(teacherId)); if(!t)return; openProfileEditModal(t.user_id,t.id); }
 
@@ -1334,13 +1334,82 @@ async function deleteSection(id) {
    SUBJECTS + TEACHERS
 ========================================================= */
 
+let pendingTeacherImport = [];
+
+function csvCell(v){
+  const x=String(v??'');
+  return /[",\n]/.test(x) ? `"${x.replace(/"/g,'""')}"` : x;
+}
+function downloadTeacherImportTemplate(){
+  const bom='\ufeff';
+  const rows=[['اسم المدرس','التخصص','الرقم الوظيفي','الهاتف'],['أحمد علي حسن','الرياضيات','T001','']];
+  downloadTextFile('masar-teachers-template.csv',bom+rows.map(r=>r.map(csvCell).join(',')).join('\n'));
+}
+function parseCsvLine(line){
+  const out=[]; let cur='',q=false;
+  for(let i=0;i<line.length;i++){
+    const c=line[i];
+    if(c==='"'){ if(q&&line[i+1]==='"'){cur+='"';i++;} else q=!q; }
+    else if(c===','&&!q){out.push(cur.trim());cur='';}
+    else cur+=c;
+  }
+  out.push(cur.trim()); return out;
+}
+function normalizeImportRows(text){
+  const lines=String(text||'').replace(/\r/g,'').split('\n').map(x=>x.trim()).filter(Boolean);
+  if(!lines.length)return [];
+  let rows=lines.map(parseCsvLine);
+  const header=rows[0].map(x=>x.trim());
+  const hasHeader=header.some(x=>/اسم|التخصص|وظيف|هاتف/.test(x));
+  if(hasHeader) rows=rows.slice(1);
+  return rows.map((r,i)=>({
+    row:i+1, full_name:(r[0]||'').trim(), specialization:(r[1]||'').trim(),
+    employee_code:(r[2]||'').trim(), phone:(r[3]||'').trim()
+  })).filter(x=>x.full_name);
+}
+function importRowIssues(rows){
+  const names=new Set(),codes=new Set();
+  const existingNames=new Set(state.teachers.map(t=>String(t.name||'').trim().toLowerCase()));
+  const existingCodes=new Set(state.teachers.map(t=>String(t.employee_code||'').trim().toLowerCase()).filter(Boolean));
+  return rows.map(r=>{
+    const issues=[]; const n=r.full_name.toLowerCase(), c=r.employee_code.toLowerCase();
+    if(r.full_name.length<3)issues.push('الاسم قصير');
+    if(names.has(n)||existingNames.has(n))issues.push('اسم مكرر'); names.add(n);
+    if(c&&(codes.has(c)||existingCodes.has(c)))issues.push('رقم وظيفي مكرر'); if(c)codes.add(c);
+    return {...r,issues};
+  });
+}
+function renderTeacherImportPreview(rows){
+  pendingTeacherImport=importRowIssues(rows);
+  const target=$('#teacherImportPreview'); if(!target)return;
+  if(!pendingTeacherImport.length){target.innerHTML='<div class="empty">لا توجد أسماء صالحة للمعاينة.</div>';return;}
+  target.innerHTML=`<div class="notice">تمت قراءة ${pendingTeacherImport.length} سجلاً. الصفوف ذات المشكلة لن يتم استيرادها.</div><div class="table-wrap"><table class="table"><thead><tr><th>الاسم</th><th>التخصص</th><th>الرقم الوظيفي</th><th>الهاتف</th><th>الحالة</th></tr></thead><tbody>${pendingTeacherImport.map(r=>`<tr><td>${safeText(r.full_name)}</td><td>${safeText(r.specialization)}</td><td>${safeText(r.employee_code)}</td><td>${safeText(r.phone)}</td><td>${r.issues.length?`<span class="badge badge-danger">${safeText(r.issues.join('، '))}</span>`:'<span class="badge badge-success">جاهز</span>'}</td></tr>`).join('')}</tbody></table></div>`;
+}
+function openTeacherBulkImport(){
+  pendingTeacherImport=[];
+  showModal(modal('استيراد الكادر التدريسي',`<div class="notice">يمكنك لصق الأسماء فقط، أو لصق/رفع CSV بالأعمدة: اسم المدرس، التخصص، الرقم الوظيفي، الهاتف. لا يتم إنشاء حساب دخول تلقائياً.</div><div class="field"><label>لصق البيانات</label><textarea id="teacherImportText" rows="8" placeholder="أحمد علي حسن,الرياضيات,T001,\nمحمد كريم جاسم,الفيزياء,T002,"></textarea></div><div class="toolbar"><input id="teacherImportFile" type="file" accept=".csv,text/csv"><button type="button" class="btn btn-soft" id="previewTeacherImport">معاينة وفحص</button></div><div id="teacherImportPreview"></div><button type="button" class="btn btn-primary" id="commitTeacherImport" disabled>اعتماد وإضافة الكادر</button>`));
+  const txt=$('#teacherImportText'),file=$('#teacherImportFile'),commit=$('#commitTeacherImport');
+  $('#previewTeacherImport')?.addEventListener('click',()=>{renderTeacherImportPreview(normalizeImportRows(txt.value));commit.disabled=!pendingTeacherImport.some(r=>!r.issues.length);});
+  file?.addEventListener('change',async()=>{const f=file.files?.[0];if(!f)return;txt.value=await f.text();renderTeacherImportPreview(normalizeImportRows(txt.value));commit.disabled=!pendingTeacherImport.some(r=>!r.issues.length);});
+  commit?.addEventListener('click',commitTeacherImport);
+}
+async function commitTeacherImport(){
+  const valid=pendingTeacherImport.filter(r=>!r.issues.length); if(!valid.length)return alert('لا توجد سجلات جاهزة للاستيراد.');
+  const btn=$('#commitTeacherImport'); btn.disabled=true; btn.textContent='جارٍ الاستيراد...';
+  try{
+    const payload=valid.map(r=>({user_id:null,full_name:r.full_name,employee_code:r.employee_code||null,specialization:r.specialization||null,phone:r.phone||null}));
+    const {error}=await supabaseClient.from('teachers').insert(payload); if(error)throw error;
+    await loadSchoolData(); $('.modal-backdrop')?.remove(); render(); alert(`تمت إضافة ${valid.length} من أفراد الكادر بنجاح.`);
+  }catch(e){alert('تعذر استيراد الكادر: '+(e?.message||'خطأ غير معروف'));btn.disabled=false;btn.textContent='اعتماد وإضافة الكادر';}
+}
+
 function teachersView() {
   if (!isAdmin()) return denied();
 
   return `
     <div class="page-title">
       <h1>المعلمون والمواد</h1>
-      <button class="btn btn-primary" data-action="add-subject">+ إضافة مادة</button>
+      <div class="toolbar"><button class="btn btn-primary" data-action="bulk-import-teachers">استيراد الكادر</button><button class="btn btn-soft" data-action="download-teacher-template">تنزيل نموذج CSV</button><button class="btn btn-primary" data-action="add-subject">+ إضافة مادة</button></div>
     </div>
 
     <div class="grid two-col">

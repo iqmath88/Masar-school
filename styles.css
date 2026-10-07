@@ -97,3 +97,5 @@ body:has(.modal-backdrop){overflow:hidden;}
   .tt-school-master .tt-entry strong{font-size:7px!important}
   .tt-school-master .tt-entry small{font-size:6px!important}
 }
+/* v1.8.1 bulk staff import */
+.modal textarea{width:100%;border:1px solid var(--border);border-radius:12px;padding:12px 14px;background:#fff;outline:none;font:inherit;resize:vertical;min-height:140px}.modal textarea:focus{border-color:#8db5ff;box-shadow:0 0 0 3px rgba(20,84,196,.08)}
